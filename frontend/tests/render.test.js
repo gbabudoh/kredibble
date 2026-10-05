@@ -22,3 +22,15 @@ describe("rendering untrusted model output", () => {
     expect(html).toContain('rel="noopener noreferrer nofollow"');
   });
 });
+
+describe("automatic citation markers", async () => {
+  const { escapeAutoCitations } = await import("../src/core/render.js");
+  it("do not turn the text between two markers into strikethrough", () => {
+    const text = "The cap is £2,500,000 [~S1]. Fraud is not limited [~S1].";
+    const html = renderMarkdown(escapeAutoCitations(text));
+    expect(html).not.toContain("<del>");
+    expect(html).not.toContain("<s>");
+    expect((html.match(/\[~S1\]/g) || []).length).toBe(2); // left intact for the citation decorator
+    expect(renderMarkdown("~~real strikethrough~~")).toContain("<del>");
+  });
+});

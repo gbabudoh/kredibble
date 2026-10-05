@@ -5,7 +5,8 @@ import { loadModelSource } from "./engine/source.js";
 import { MODELS, DEFAULT_MODEL_KEY } from "./engine/models.js";
 import { ThreadStore, FeedbackStore, setCipher, hasSealedRecords } from "./core/db.js";
 import { createVault, recordCipher, unlockVault } from "./core/vault.js";
-import { renderMarkdown, escapeHtml } from "./core/render.js";
+import { renderMarkdown, escapeHtml, escapeAutoCitations } from "./core/render.js";
+import { icon } from "./core/icons.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
 import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
@@ -40,10 +41,10 @@ const storage = {
 const IDLE_LOCK_MS = 15 * 60 * 1000;
 
 const HERO_PROMPTS = [
-  { title: "🌍 General question", desc: "Ask anything — answered on this device", prompt: "What is the capital of the UK?" },
-  { title: "📋 NDA review checklist", desc: "Key clauses to check in a mutual NDA", prompt: "Give me a checklist of the key clauses to review in a mutual NDA, with one line on why each matters." },
-  { title: "🔒 GDPR data minimisation", desc: "Explain Article 5(1)(c) in plain terms", prompt: "Explain GDPR Article 5(1)(c) data minimisation in plain English, with two practical examples." },
-  { title: "📄 Analyse a document", desc: "PDF/TXT read in this browser, never uploaded", action: "pick-file" },
+  { icon: "globe", title: "Ask a general question", desc: "Answered privately on this device", prompt: "What is the capital of the UK?" },
+  { icon: "list", title: "NDA review checklist", desc: "Key clauses to check in a mutual NDA", prompt: "Give me a checklist of the key clauses to review in a mutual NDA, with one line on why each matters." },
+  { icon: "shield", title: "Explain GDPR data minimisation", desc: "Article 5(1)(c) in plain English", prompt: "Explain GDPR Article 5(1)(c) data minimisation in plain English, with two practical examples." },
+  { icon: "fileSearch", title: "Analyse a document", desc: "PDF or text, read in this browser", action: "pick-file" },
 ];
 
 class KredibbleApp {
@@ -108,7 +109,7 @@ class KredibbleApp {
   bindEvents() {
     const actions = {
       "new-chat": () => this.newChat(),
-      "toggle-sidebar": () => $("app-sidebar").classList.toggle("collapsed"),
+      "toggle-sidebar": () => this.toggleSidebar(),
       "toggle-theme": () => this.applyTheme(document.body.classList.contains("theme-dark") ? "light" : "dark"),
       "toggle-tts": () => this.toggleTTS(),
       "show-telemetry": () => this.showDiagnostics(true),
@@ -214,6 +215,7 @@ class KredibbleApp {
 
     const labels = { idle: "Not loaded", loading: "Loading…", ready: "On-device", error: "Error", unsupported: "No WebGPU" };
     $("top-status-text").textContent = labels[state];
+    $("status-dot").dataset.state = state;
     this.updateDiagnostics();
   }
 
@@ -354,8 +356,23 @@ class KredibbleApp {
     return this.threads.find((t) => t.id === this.activeThreadId) || this.threads[0];
   }
 
+  isNarrow() {
+    return window.matchMedia("(max-width: 860px)").matches;
+  }
+
+  /** Small screens: slide the sidebar over the chat. Wide screens: collapse it. */
+  toggleSidebar() {
+    if (this.isNarrow()) document.body.classList.toggle("sidebar-open");
+    else $("app-sidebar").classList.toggle("collapsed");
+  }
+
+  closeMobileSidebar() {
+    document.body.classList.remove("sidebar-open");
+  }
+
   newChat() {
     if (this.isStreaming) return;
+    this.closeMobileSidebar();
     this.createThread();
     this.setDocument(null);
     this.renderThreads();
@@ -365,6 +382,7 @@ class KredibbleApp {
 
   selectThread(id) {
     if (this.isStreaming) return;
+    this.closeMobileSidebar();
     this.activeThreadId = id;
     this.renderThreads();
     this.renderMessages();
@@ -645,8 +663,8 @@ class KredibbleApp {
     const visible = this.threads.filter((t) => t.messages.length || t.id === this.activeThreadId);
 
     const heading = document.createElement("div");
-    heading.className = "threads-section-title";
-    heading.textContent = "Recent Chats";
+    heading.className = "threads-title";
+    heading.textContent = "Recent";
     container.append(heading);
 
     for (const t of visible) {
@@ -655,20 +673,23 @@ class KredibbleApp {
       item.dataset.action = "select-thread";
       item.dataset.id = t.id;
 
-      const title = document.createElement("div");
+      const glyph = document.createElement("span");
+      glyph.className = "thread-icon";
+      glyph.innerHTML = icon("chat", 15);
+
+      const title = document.createElement("span");
       title.className = "thread-title";
-      const span = document.createElement("span");
-      span.textContent = t.title || "New chat";
-      title.append(span);
+      title.textContent = t.title || "New chat";
 
       const del = document.createElement("button");
-      del.className = "thread-delete-btn";
+      del.className = "thread-delete";
       del.title = "Delete chat";
-      del.textContent = "✕";
+      del.setAttribute("aria-label", "Delete chat");
+      del.innerHTML = icon("trash", 14);
       del.dataset.action = "delete-thread";
       del.dataset.id = t.id;
 
-      item.append(title, del);
+      item.append(glyph, title, del);
       container.append(item);
     }
   }
@@ -679,15 +700,18 @@ class KredibbleApp {
 
     if (!thread || !thread.messages.length) {
       container.innerHTML = `
-        <div class="chatgpt-hero-state">
-          <div class="hero-shield-icon">🛡️</div>
-          <h2 class="hero-title">What can I help with privately?</h2>
-          <p class="hero-subtitle">The language model runs in this browser. Your prompts and documents are processed on this device.</p>
-          <div class="hero-prompt-grid">
+        <div class="hero">
+          <span class="hero-icon">${icon("shieldCheck", 26)}</span>
+          <h2 class="hero-title">What can I help with?</h2>
+          <p class="hero-subtitle">Everything runs privately in this browser. Your questions and documents never leave this device.</p>
+          <div class="hero-grid">
             ${HERO_PROMPTS.map((p) => `
-              <div class="hero-prompt-card" data-action="${p.action || "hero-prompt"}" ${p.prompt ? `data-prompt="${escapeHtml(p.prompt)}"` : ""}>
-                <div class="hero-prompt-title">${p.title}</div>
-                <div class="hero-prompt-desc">${p.desc}</div>
+              <div class="hero-card" data-action="${p.action || "hero-prompt"}" ${p.prompt ? `data-prompt="${escapeHtml(p.prompt)}"` : ""}>
+                <span class="hero-card-icon">${icon(p.icon, 16)}</span>
+                <span>
+                  <span class="hero-card-title">${p.title}</span>
+                  <span class="hero-card-desc">${p.desc}</span>
+                </span>
               </div>`).join("")}
           </div>
         </div>`;
@@ -700,21 +724,21 @@ class KredibbleApp {
       const pending = isAssistant && !m.content && this.isStreaming && i === lastIndex;
       const showActions = isAssistant && m.content && !(this.isStreaming && i === lastIndex);
       const body = isAssistant
-        ? (pending ? `<span class="msg-pending">Generating on this device…</span>`
-          : showActions ? this.decorateCitations(renderMarkdown(m.content), m.meta, i) : renderMarkdown(m.content))
+        ? (pending ? `<span class="msg-pending">Thinking on this device…</span>`
+          : showActions ? this.decorateCitations(renderMarkdown(escapeAutoCitations(m.content)), m.meta, i) : renderMarkdown(m.content))
         : `<div class="msg-user-text">${escapeHtml(m.content)}</div>`;
       return `
         <div class="msg-turn ${m.role}${m.error ? " error" : ""}">
-          <div class="msg-avatar">${m.role === "user" ? "U" : "🛡️"}</div>
-          <div class="msg-content-wrapper">
+          <div class="msg-avatar">${icon("shieldCheck", 15)}</div>
+          <div class="msg-content">
             <div class="msg-body">${body}</div>
             ${showActions ? `
               <div class="msg-actions">
-                <button class="msg-action-btn" data-action="copy" data-index="${i}" title="Copy response">📋 Copy</button>
-                <button class="msg-action-btn" data-action="speak" data-index="${i}" title="Read aloud">🔊 Read</button>
+                <button class="msg-action-btn" data-action="copy" data-index="${i}" title="Copy" aria-label="Copy">${icon("copy", 15)}</button>
+                <button class="msg-action-btn" data-action="speak" data-index="${i}" title="Read aloud" aria-label="Read aloud">${icon("volume", 15)}</button>
                 ${m.error || m.meta?.task?.type === "pii" ? "" : this.renderRatingButtons(m, i)}
                 ${m.meta?.task?.type === "pii" && m.meta.task.total && this.activeDoc?.filename === m.meta.doc
-                  ? `<button class="msg-action-btn" data-action="pii-download" title="Download a redacted text copy">⬇ Redacted copy</button>` : ""}
+                  ? `<button class="msg-action-btn" data-action="pii-download" title="Download a redacted text copy">${icon("download", 15)}<span>Redacted copy</span></button>` : ""}
                 ${this.renderMeta(m.meta)}
               </div>
               ${this.renderGrounding(m.meta, i)}
@@ -741,20 +765,21 @@ class KredibbleApp {
   renderMeta(meta) {
     if (!meta) return "";
     const parts = [];
-    if (meta.model) parts.push(escapeHtml(meta.model.replace(/-MLC$/, "")));
-    if (meta.tokensPerSec) parts.push(`${meta.tokensPerSec.toFixed(1)} tok/s`);
     const r = meta.retrieval;
     if (r) {
       const how = {
-        summary: "spread across document", sample: "document sample", extract: "extraction", compliance: "compliance check",
-        search: r.semanticUsed ? "keyword + semantic search" : "keyword search",
-      }[r.mode];
-      parts.push(`${meta.sources?.length ?? 0} of ${r.totalChunks} passages · ${how}`);
-      if (r.semanticPending) parts.push("semantic index still building");
+        summary: "summary of the whole document", sample: "document sample", extract: "extraction", compliance: "compliance check",
+        search: r.semanticUsed ? "smart search" : "keyword search",
+      }[r.mode] || "";
+      const n = meta.sources?.length ?? 0;
+      parts.push(`${n} source${n === 1 ? "" : "s"}${how ? ` · ${how}` : ""}`);
+      if (r.semanticPending) parts.push("smart search still preparing");
     }
-    if (meta.route?.intent === "general") parts.push("routed: general question");
-    if (meta.droppedTurns > 0) parts.push(`${meta.droppedTurns} older message(s) not in context`);
-    return parts.length ? `<span class="msg-meta">${parts.join(" · ")}</span>` : "";
+    if (meta.route?.intent === "general") parts.push("general knowledge");
+    if (meta.droppedTurns > 0) parts.push("older messages not used");
+    if (meta.tokensPerSec) parts.push(`${meta.tokensPerSec.toFixed(1)} tok/s`);
+    const detail = [meta.model?.replace(/-MLC$/, ""), r ? `${meta.sources?.length ?? 0} of ${r.totalChunks} passages` : ""].filter(Boolean).join(" · ");
+    return parts.length ? `<span class="msg-meta" title="${escapeHtml(detail)}">${parts.join(" · ")}</span>` : "";
   }
 
   renderGrounding(meta, msgIndex) {
@@ -762,26 +787,26 @@ class KredibbleApp {
     if (!v) return "";
     const badge = {
       grounded: v.autoCited?.length
-        ? `<span class="ground-badge ok">✓ Figures match the sources · citations matched automatically</span>`
-        : `<span class="ground-badge ok">✓ Citations and figures match the sources</span>`,
-      abstained: `<span class="ground-badge muted">Not found in document</span>`,
-      general: `<span class="ground-badge muted">General knowledge, not from ${escapeHtml(meta.doc || "the document")} · may be wrong or out of date</span>`,
-      warning: `<span class="ground-badge warn">⚠ Check this answer: ${v.issues.map((x) => escapeHtml(describeIssue(x))).join("; ")}</span>`,
+        ? `<span class="ground-badge ok">${icon("check", 13)}Matches the document · sources linked automatically</span>`
+        : `<span class="ground-badge ok">${icon("check", 13)}Matches the document</span>`,
+      abstained: `<span class="ground-badge muted">${icon("info", 13)}Not found in the document</span>`,
+      general: `<span class="ground-badge muted">${icon("globe", 13)}General knowledge, not from ${escapeHtml(meta.doc || "the document")}. May be wrong or out of date</span>`,
+      warning: `<span class="ground-badge warn">${icon("alert", 13)}Check this answer: ${v.issues.map((x) => escapeHtml(describeIssue(x))).join("; ")}</span>`,
     }[v.status];
 
     if (!meta.sources?.length) return `<div class="grounding">${badge}</div>`;
     const cited = new Set(v.citedIds);
     const items = meta.sources.map((s) => `
       <div class="source-item${cited.has(s.id) ? " cited" : ""}" data-src-id="${msgIndex}-${s.id}">
-        <div class="source-head"><strong>${s.id}</strong> · p. ${s.page}${s.section ? ` · ${escapeHtml(s.section)}` : ""}${cited.has(s.id) ? " · cited" : ""}</div>
+        <div class="source-head"><span class="source-id">${s.id}</span><span>Page ${s.page}</span>${s.section ? `<span>· ${escapeHtml(s.section)}</span>` : ""}${cited.has(s.id) ? "<span>· cited</span>" : ""}</div>
         <div class="source-text">${escapeHtml(s.text)}</div>
       </div>`).join("");
     return `
       <div class="grounding">
         ${badge}
         <details class="sources" id="sources-${msgIndex}">
-          <summary>Sources: ${cited.size} cited of ${meta.sources.length} provided</summary>
-          ${items}
+          <summary>${icon("chevronRight", 14)}${meta.sources.length} source${meta.sources.length === 1 ? "" : "s"} from the document</summary>
+          <div class="source-list">${items}</div>
         </details>
       </div>`;
   }
@@ -841,10 +866,12 @@ class KredibbleApp {
     $("diag-ttft").textContent = usage?.extra?.time_to_first_token_s ? `${usage.extra.time_to_first_token_s.toFixed(2)} s` : "—";
 
     const loaded = this.llm.loadedModelId;
-    $("model-pill-name").textContent = loaded
-      ? LocalLLM.modelByKey(MODELS.find((m) => m.f16 === loaded || m.f32 === loaded)?.key).label.replace(/\s*\(.*\)$/, "")
-      : "No model loaded";
-    $("top-speed-indicator").textContent = usage?.extra?.decode_tokens_per_s ? `${usage.extra.decode_tokens_per_s.toFixed(1)} tok/s` : "—";
+    // Name the loaded model, or the selected one while nothing is loaded; the status sits beside it.
+    const shown = loaded ? MODELS.find((m) => m.f16 === loaded || m.f32 === loaded)?.key : this.modelKey;
+    $("model-pill-name").textContent = LocalLLM.modelByKey(shown).label.replace(/\s*\(.*\)$/, "");
+    const speed = usage?.extra?.decode_tokens_per_s;
+    $("top-speed-indicator").textContent = speed ? `${speed.toFixed(1)} tok/s` : "";
+    $("top-speed-indicator").hidden = !speed;
   }
 
   showDiagnostics(show) {
@@ -913,8 +940,11 @@ class KredibbleApp {
   }
 
   updateTTSButton() {
-    $("tts-icon").textContent = this.ttsEnabled ? "🔊" : "🔇";
-    $("tts-toggle-btn").classList.toggle("active", this.ttsEnabled);
+    const btn = $("tts-toggle-btn");
+    btn.innerHTML = icon(this.ttsEnabled ? "volume" : "volumeOff", 18);
+    btn.classList.toggle("active", this.ttsEnabled);
+    btn.setAttribute("aria-pressed", String(this.ttsEnabled));
+    btn.title = this.ttsEnabled ? "Reading answers aloud (click to turn off)" : "Read answers aloud";
   }
 
   speak(text) {
@@ -941,8 +971,9 @@ class KredibbleApp {
 
   applyTheme(theme) {
     storage.set("kredibble_theme", theme);
-    document.body.className = `theme-${theme}`;
-    $("theme-btn").textContent = theme === "dark" ? "☀️" : "🌘";
+    document.body.classList.remove("theme-dark", "theme-light");
+    document.body.classList.add(`theme-${theme}`);
+    $("theme-btn").innerHTML = icon(theme === "dark" ? "sun" : "moon", 18);
   }
 
   // ---------------------------------------------------------------
@@ -1149,8 +1180,8 @@ class KredibbleApp {
   renderRatingButtons(m, i) {
     const rating = m.meta?.feedback?.rating;
     return `
-      <button class="msg-action-btn rate${rating === "up" ? " active" : ""}" data-action="feedback-up" data-index="${i}" title="Good answer">👍</button>
-      <button class="msg-action-btn rate${rating === "down" ? " active" : ""}" data-action="feedback-down" data-index="${i}" title="Bad answer: tell us why">👎</button>`;
+      <button class="msg-action-btn${rating === "up" ? " active" : ""}" data-action="feedback-up" data-index="${i}" title="Good answer" aria-label="Good answer">${icon("thumbUp", 15)}</button>
+      <button class="msg-action-btn${rating === "down" ? " active" : ""}" data-action="feedback-down" data-index="${i}" title="Bad answer: tell us why" aria-label="Bad answer">${icon("thumbDown", 15)}</button>`;
   }
 
   renderFeedbackForm(i) {
@@ -1163,8 +1194,8 @@ class KredibbleApp {
         <div class="fb-reasons">${reasons}</div>
         <textarea class="fb-correction" rows="2" maxlength="1000" placeholder="What should the answer be? (optional, saved on this device only)">${escapeHtml(current.correction || "")}</textarea>
         <div class="fb-buttons">
-          <button class="btn-top-action" data-action="feedback-cancel">Cancel</button>
-          <button class="btn-top-action" data-action="feedback-save" data-index="${i}">Save feedback</button>
+          <button class="btn" data-action="feedback-cancel">Cancel</button>
+          <button class="btn btn-primary" data-action="feedback-save" data-index="${i}">Save feedback</button>
         </div>
       </div>`;
   }
@@ -1225,7 +1256,9 @@ class KredibbleApp {
     const up = this.feedback.filter((r) => r.rating === "up").length;
     const down = this.feedback.length - up;
     const corrected = this.feedback.filter((r) => r.correction).length;
-    $("diag-feedback").textContent = `${this.feedback.length} saved (👍 ${up} · 👎 ${down}, ${corrected} with corrections)`;
+    $("diag-feedback").textContent = this.feedback.length
+      ? `${up} helpful · ${down} not helpful${corrected ? ` (${corrected} corrected)` : ""}`
+      : "None yet";
     $("diag-fewshot").checked = this.useExamples;
     $("diag-metrics").checked = metricsEnabled();
     const sample = lastEvent() || buildEvent("answer", { meta: { model: this.llm.loadedModelId || "none", route: { intent: "qa" }, verification: { status: "grounded", issues: [] } } }, { latencyMs: 12000 });

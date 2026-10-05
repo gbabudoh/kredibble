@@ -27,6 +27,13 @@ export function renderMarkdown(text) {
   });
 }
 
+/**
+ * Automatic citation markers look like "[~S1]". Two of them in one paragraph would be read
+ * by Markdown as ~strikethrough~ and strike out the text between them, so the tilde is
+ * escaped before rendering; the citation decorator then sees "[~S1]" again in the HTML.
+ */
+export const escapeAutoCitations = (text) => (text || "").replace(/\[~(?=S\d)/g, "[\\~");
+
 export function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text ?? "";
