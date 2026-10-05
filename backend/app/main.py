@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import auth, document, metrics
+from app.routers import account, auth, document, metrics
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 REGISTRY_FILE = Path(__file__).parent / "registry" / "registry.json"
@@ -46,7 +46,7 @@ SECURITY_HEADERS = {
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.PROJECT_NAME,
-        description="Kredibble API: authentication and optional document utilities. "
+        description="Kredibble API: accounts, authentication and optional document utilities. "
                     "LLM inference runs in the browser via WebLLM, not on this server.",
         version="1.1.0",
     )
@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+    app.include_router(account.router, prefix="/api/v1/account", tags=["Accounts"])
     app.include_router(document.router, prefix="/api/v1/docs", tags=["Document Parsing"])
     app.include_router(metrics.router, prefix="/api/v1/metrics", tags=["Anonymous Metrics (opt-in)"])
 

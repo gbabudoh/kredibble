@@ -8,7 +8,8 @@ import { ThreadStore, FeedbackStore, setCipher, hasSealedRecords } from "./core/
 import { createVault, recordCipher, unlockVault } from "./core/vault.js";
 import { renderMarkdown, escapeHtml, escapeAutoCitations } from "./core/render.js";
 import { icon } from "./core/icons.js";
-import { PERSONAS, getPersona, DEFAULT_PERSONA_ID } from "./core/personas.js";
+import { PERSONAS, getPersona, personaForUserType, DEFAULT_PERSONA_ID } from "./core/personas.js";
+import { AccountAPI } from "./services/account.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
 import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
@@ -76,6 +77,10 @@ class KredibbleApp {
     this.renderQueued = false;
     this.stickToBottom = true; // follow new output unless the reader has scrolled up
     this.renderedTurns = { threadId: null, count: 0 };
+    this.account = null; // signed-in account (identity and plan only), or null
+    this.accountsEnabled = false;
+    this.authView = "signin";
+    this.resetToken = null;
   }
 
   async init() {
@@ -85,6 +90,7 @@ class KredibbleApp {
     this.renderPersonaModalGrid();
     this.bindEvents();
     this.setupSpeechRecognition();
+    this.loadAccount().then(() => this.handleAccountLinks());
     const source = await loadModelSource();
     this.llm.setSource(source);
     if (source.selfHosted) this.embedder.appConfig = source.appConfig;
@@ -151,6 +157,12 @@ class KredibbleApp {
       "select-persona": (el) => this.selectPersona(el.dataset.id),
       "toggle-workspace-menu": () => this.showWorkspaceMenu($("workspace-menu").hidden),
       "open-workspace-menu": () => this.openWorkspaceMenuFromTopbar(),
+      "open-auth": (el) => this.openAuth(el.dataset.view),
+      "close-auth": () => this.closeAuth(),
+      "sign-out": () => this.signOut(),
+      "resend-verification": () => this.resendVerification(),
+      "save-account": () => this.saveAccount(),
+      "delete-account": () => this.deleteAccount(),
       "open-tier-modal": () => this.showTierModal(true),
       "close-tier-modal": () => this.showTierModal(false),
       "subscribe-tier": (el) => this.handleSubscription(el.dataset.tier),
@@ -177,10 +189,18 @@ class KredibbleApp {
       if (e.target.id === "telemetry-modal") this.showDiagnostics(false);
     });
     document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("auth-modal").hidden) this.closeAuth();
       if (e.key === "Escape" && !$("workspace-menu").hidden) {
         this.showWorkspaceMenu(false);
         $("workspace-btn").focus();
       }
+    });
+    $("auth-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      this.submitAuth();
+    });
+    $("auth-modal").addEventListener("click", (e) => {
+      if (e.target.id === "auth-modal") this.closeAuth();
     });
     $("persona-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "persona-modal") this.showPersonaModal(false);
@@ -1474,7 +1494,249 @@ class KredibbleApp {
     this.showTierModal(false);
     this.toast("Enterprise team contacted for custom deployment.");
   }
+
+  // ---------------------------------------------------------------
+  // Accounts (identity and plan only; chats stay on this device)
+  // ---------------------------------------------------------------
+  async loadAccount() {
+    const { enabled, account } = await AccountAPI.session();
+    this.accountsEnabled = enabled;
+    this.setAccount(account);
+  }
+
+  setAccount(account) {
+    this.account = account;
+    $("account-box").hidden = !this.accountsEnabled;
+    $("settings-account").hidden = !this.accountsEnabled;
+    $("account-signed-out").hidden = !!account;
+    $("account-signed-in").hidden = !account;
+    if (account) {
+      const name = account.display_name || account.email.split("@")[0];
+      $("account-avatar").textContent = name.charAt(0).toUpperCase();
+      $("account-name").textContent = name;
+      $("account-sub").textContent = account.email_verified ? `${PLAN_LABELS[account.plan] || account.plan} plan` : "Confirm your email";
+      $("account-sub").classList.toggle("warn-text", !account.email_verified);
+    }
+    this.renderAccountSettings();
+  }
+
+  /** Links from account emails: /?verify=TOKEN and /?reset=TOKEN. Removed from the address bar at once. */
+  async handleAccountLinks() {
+    const params = new URLSearchParams(location.search);
+    const verify = params.get("verify");
+    const reset = params.get("reset");
+    if (!verify && !reset) return;
+    history.replaceState(null, "", location.pathname);
+    if (!this.accountsEnabled) return;
+    if (reset) {
+      this.resetToken = reset;
+      this.openAuth("reset");
+      return;
+    }
+    try {
+      await AccountAPI.verifyEmail(verify);
+      this.toast("Email confirmed. Thank you!");
+      await this.loadAccount();
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
+
+  openAuth(view = "signin") {
+    this.authView = view;
+    this.showDiagnostics(false);
+    this.closeMobileSidebar();
+    this.renderAuth();
+    $("auth-modal").hidden = false;
+    $("auth-fields").querySelector("input")?.focus();
+  }
+
+  closeAuth() {
+    $("auth-modal").hidden = true;
+    this.resetToken = null;
+  }
+
+  renderAuth() {
+    const view = this.authView;
+    const field = (id, label, type, autocomplete, extra = "") =>
+      `<label class="field"><span class="field-label">${label}</span><input class="input" id="${id}" type="${type}" autocomplete="${autocomplete}" ${extra}></label>`;
+    const passwordHint = `<span class="field-hint">At least 10 characters. A short phrase is easy to remember.</span>`;
+    const typeOptions = PERSONAS.map((p) =>
+      `<option value="${p.userType}"${p.id === this.activePersonaId ? " selected" : ""}>${escapeHtml(p.audience)} · ${escapeHtml(p.shortName)}</option>`).join("");
+    const link = (to, text) => `<button type="button" class="link-btn" data-action="open-auth" data-view="${to}">${text}</button>`;
+
+    const views = {
+      signin: {
+        title: "Welcome back",
+        subtitle: "Sign in to your Kredibble account.",
+        fields: field("auth-email", "Email", "email", "email", "required") +
+          field("auth-password", "Password", "password", "current-password", "required") +
+          `<div class="field-aside">${link("forgot", "Forgot password?")}</div>`,
+        submit: "Sign in",
+        switch: `New to Kredibble? ${link("register", "Create a free account")}`,
+      },
+      register: {
+        title: "Create your account",
+        subtitle: "Free, and the AI still runs privately on this device.",
+        fields: field("auth-name", "Name <span class=\"field-optional\">(optional)</span>", "text", "name", 'maxlength="80"') +
+          field("auth-email", "Email", "email", "email", "required") +
+          field("auth-password", "Password", "password", "new-password", 'required minlength="10"') + passwordHint +
+          `<label class="field"><span class="field-label">Kredibble is mainly for</span><select class="input select" id="auth-type">${typeOptions}</select></label>`,
+        submit: "Create account",
+        switch: `Already have an account? ${link("signin", "Sign in")}`,
+      },
+      forgot: {
+        title: "Reset your password",
+        subtitle: "Enter your email and we'll send you a link to choose a new password.",
+        fields: field("auth-email", "Email", "email", "email", "required"),
+        submit: "Send reset link",
+        switch: link("signin", "Back to sign in"),
+      },
+      reset: {
+        title: "Choose a new password",
+        subtitle: "You'll be signed in, and signed out everywhere else.",
+        fields: field("auth-password", "New password", "password", "new-password", 'required minlength="10"') + passwordHint,
+        submit: "Save password",
+        switch: "",
+      },
+      sent: {
+        title: "Check your email",
+        subtitle: "If an account exists for that address, a reset link is on its way. It works for 1 hour.",
+        fields: "",
+        submit: "Back to sign in",
+        switch: "",
+      },
+    };
+    const v = views[view];
+    $("auth-title").textContent = v.title;
+    $("auth-subtitle").textContent = v.subtitle;
+    $("auth-fields").innerHTML = v.fields;
+    $("auth-submit").textContent = v.submit;
+    $("auth-switch").innerHTML = v.switch;
+    $("auth-switch").hidden = !v.switch;
+    $("auth-error").hidden = true;
+  }
+
+  async submitAuth() {
+    const view = this.authView;
+    if (view === "sent") return this.openAuth("signin");
+    const value = (id) => $(id)?.value.trim() ?? "";
+    const button = $("auth-submit");
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Please wait…";
+    $("auth-error").hidden = true;
+    try {
+      if (view === "signin") {
+        this.setAccount(await AccountAPI.login(value("auth-email"), $("auth-password").value));
+        this.closeAuth();
+        this.toast("Signed in.");
+      } else if (view === "register") {
+        const account = await AccountAPI.register({
+          email: value("auth-email"),
+          password: $("auth-password").value,
+          display_name: value("auth-name") || null,
+          user_type: $("auth-type").value,
+        });
+        this.setAccount(account);
+        this.closeAuth();
+        this.selectPersona(personaForUserType(account.user_type).id);
+        this.toast("Account created. Check your email to confirm your address.");
+      } else if (view === "forgot") {
+        await AccountAPI.forgotPassword(value("auth-email"));
+        this.openAuth("sent");
+      } else if (view === "reset") {
+        this.setAccount(await AccountAPI.resetPassword(this.resetToken, $("auth-password").value));
+        this.closeAuth();
+        this.toast("Password changed. You're signed in.");
+      }
+    } catch (err) {
+      $("auth-error").textContent = err.message;
+      $("auth-error").hidden = false;
+    } finally {
+      button.disabled = false;
+      if (this.authView === view) button.textContent = label;
+    }
+  }
+
+  renderAccountSettings() {
+    const body = $("settings-account-body");
+    const account = this.account;
+    if (!account) {
+      body.innerHTML = `
+        <p class="settings-note">You're using Kredibble without an account. Create a free one to keep your plan and preferences.</p>
+        <div class="settings-actions">
+          <button class="btn btn-primary" data-action="open-auth" data-view="signin">Sign in</button>
+          <button class="btn" data-action="open-auth" data-view="register">Create account</button>
+        </div>`;
+      return;
+    }
+    const typeOptions = PERSONAS.map((p) =>
+      `<option value="${p.userType}"${p.userType === account.user_type ? " selected" : ""}>${escapeHtml(p.audience)} · ${escapeHtml(p.shortName)}</option>`).join("");
+    body.innerHTML = `
+      <div class="setting-row">
+        <span class="setting-label">Email</span>
+        <span class="setting-value">${escapeHtml(account.email)}${account.email_verified ? "" : ` <span class="tag warn">Not confirmed</span>`}</span>
+      </div>
+      ${account.email_verified ? "" : `<p class="settings-note">Check your inbox for the confirmation link. <button class="link-btn" data-action="resend-verification">Send it again</button></p>`}
+      <div class="setting-row"><span class="setting-label">Plan</span><span class="setting-value">${escapeHtml(PLAN_LABELS[account.plan] || account.plan)}</span></div>
+      <div class="setting-row">
+        <label class="setting-label" for="acct-name">Name</label>
+        <input class="input input-sm" id="acct-name" maxlength="80" autocomplete="name" value="${escapeHtml(account.display_name || "")}" placeholder="Optional">
+      </div>
+      <div class="setting-row">
+        <label class="setting-label" for="acct-type">Mainly for</label>
+        <select class="select" id="acct-type">${typeOptions}</select>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary" data-action="save-account">Save changes</button>
+        <button class="btn" data-action="sign-out">Sign out</button>
+        <button class="btn btn-link-danger" data-action="delete-account">Delete account</button>
+      </div>`;
+  }
+
+  async saveAccount() {
+    try {
+      this.setAccount(await AccountAPI.update({ display_name: $("acct-name").value.trim() || null, user_type: $("acct-type").value }));
+      this.toast("Account updated.");
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
+
+  async resendVerification() {
+    try {
+      await AccountAPI.resendVerification();
+      this.toast("Confirmation email sent.");
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
+
+  async signOut() {
+    try {
+      await AccountAPI.logout();
+    } catch {
+      // Signed out locally either way; the server session expires on its own.
+    }
+    this.setAccount(null);
+    this.toast("Signed out. Your chats stay on this device.");
+  }
+
+  async deleteAccount() {
+    const password = prompt("This permanently deletes your Kredibble account. Chats on this device are not affected.\n\nEnter your password to confirm:");
+    if (!password) return;
+    try {
+      await AccountAPI.deleteAccount(password);
+      this.setAccount(null);
+      this.toast("Account deleted.");
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
 }
+
+const PLAN_LABELS = { free: "Free", pro: "Pro", business: "Business", enterprise: "Enterprise" };
 
 const app = new KredibbleApp();
 app.init().catch((err) => {

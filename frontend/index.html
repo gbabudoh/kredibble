@@ -59,6 +59,20 @@
           </div>
           <p class="privacy-card-text">The AI runs in this browser. Your questions and documents stay on this device.</p>
         </div>
+        <!-- Account (hidden when the server has no account database) -->
+        <div class="account-box" id="account-box" hidden>
+          <div class="account-signed-out" id="account-signed-out">
+            <button class="btn btn-primary btn-sm" data-action="open-auth" data-view="signin">Sign in</button>
+            <button class="btn btn-sm" data-action="open-auth" data-view="register">Create account</button>
+          </div>
+          <button class="account-row" id="account-signed-in" data-action="show-telemetry" title="Account and settings" hidden>
+            <span class="account-avatar" id="account-avatar" aria-hidden="true"></span>
+            <span class="account-text">
+              <span class="account-name" id="account-name"></span>
+              <span class="account-sub" id="account-sub"></span>
+            </span>
+          </button>
+        </div>
         <div class="sidebar-footer-row">
           <button class="footer-btn" data-action="show-telemetry">
             <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -285,6 +299,11 @@
       </div>
 
       <div class="modal-body">
+        <section class="settings-section" id="settings-account" hidden>
+          <h4 class="settings-title">Account</h4>
+          <div id="settings-account-body"></div>
+        </section>
+
         <section class="settings-section">
           <h4 class="settings-title">AI model</h4>
           <div class="setting-row">
@@ -358,6 +377,30 @@
   </div>
 
   <!-- Passphrase lock (create / unlock) -->
+  <!-- Sign in / create account / password reset -->
+  <div id="auth-modal" class="modal-overlay" hidden>
+    <form class="modal-card auth-card" id="auth-form" novalidate role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div class="auth-head">
+        <span class="auth-icon" aria-hidden="true">
+          <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        </span>
+        <button type="button" class="icon-btn auth-close" data-action="close-auth" title="Close" aria-label="Close">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <h3 class="modal-title" id="auth-title">Sign in</h3>
+      <p class="auth-subtitle" id="auth-subtitle"></p>
+      <div class="auth-fields" id="auth-fields"></div>
+      <p class="auth-error" id="auth-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary auth-submit" id="auth-submit">Sign in</button>
+      <p class="auth-switch" id="auth-switch"></p>
+      <p class="auth-privacy">
+        <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Your account holds your email and plan only. Chats and documents never leave this device.</span>
+      </p>
+    </form>
+  </div>
+
   <div id="vault-modal" class="modal-overlay vault-overlay" hidden>
     <form class="modal-card vault-card" id="vault-form" autocomplete="off">
       <span class="vault-icon" aria-hidden="true">

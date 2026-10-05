@@ -34,6 +34,27 @@ class Settings(BaseSettings):
     # Hashes come from `python -m app.security hash-password`.
     KREDIBBLE_USERS: Dict[str, Dict[str, str]] = {}
 
+    # User accounts (registration / sign-in). PostgreSQL in production, e.g.
+    #   postgresql+psycopg://kredibble:PASSWORD@localhost:5432/kredibble
+    # Empty disables accounts: the app still works, signed out. Tables: `alembic upgrade head`.
+    DATABASE_URL: str = ""
+    SESSION_DAYS: int = 30
+    # Secure cookies need HTTPS; plain-HTTP localhost is exempt so local development works.
+    SESSION_COOKIE_SECURE: bool = True
+
+    # Public address of the site, used in links inside emails (no trailing slash).
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+
+    # Outgoing email (verification, password reset). Empty SMTP_HOST: emails are written to
+    # the server log instead of sent, which is enough for local development.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_STARTTLS: bool = True   # port 587
+    SMTP_SSL: bool = False       # port 465 (implicit TLS)
+    MAIL_FROM: str = "Kredibble <no-reply@localhost>"
+
     # Server-side parsing is optional (the web client parses in-browser).
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 

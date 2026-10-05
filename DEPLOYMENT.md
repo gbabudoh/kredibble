@@ -70,10 +70,28 @@ Then open `http://127.0.0.1:8000`.
 
 The app then offers only the mirrored models and fetches them from `/models` on your own server. Browsers still cache them after the first load.
 
-## 6. Anonymous metrics (optional)
+## 6. User accounts (PostgreSQL)
+Accounts hold an email, a password hash, a display name, a user type and a plan. Chats, questions and documents never reach the server. Without `DATABASE_URL` the app runs signed-out only and hides the account controls.
+
+1. Create a database and a user for it (as the `postgres` superuser, e.g. in `psql -U postgres`):
+   ```sql
+   CREATE USER kredibble WITH PASSWORD 'choose-a-strong-password';
+   CREATE DATABASE kredibble OWNER kredibble;
+   ```
+2. In `.env`, set `DATABASE_URL=postgresql+psycopg://kredibble:choose-a-strong-password@localhost:5432/kredibble`.
+3. Create the tables, and run this again after every upgrade:
+   ```bash
+   cd backend && alembic upgrade head
+   ```
+4. Email: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `MAIL_FROM` for your mail server (port 587 with `SMTP_STARTTLS=true`, or port 465 with `SMTP_SSL=true` and `SMTP_STARTTLS=false`), and `PUBLIC_BASE_URL` to the site's public address so links in emails work. Until `SMTP_HOST` is set, emails are written to the server log instead, which is enough for local testing.
+5. Restart the server.
+
+Sessions are httpOnly cookies scoped to `/api`, marked `Secure` except on plain-HTTP `localhost`. Sign-in, sign-up and reset requests are rate-limited per process; with several workers, add a limit at the reverse proxy too.
+
+## 7. Anonymous metrics (optional)
 Users can opt in to sharing anonymous usage metrics. Events contain no text, only task type, check results, ratings, reason codes, model and speed, and are stored in SQLite at `METRICS_DB` (default `backend/data/metrics.sqlite`). In Docker, mount a volume at `/workspace/backend/data` to keep them across restarts. To refuse metrics entirely, set `METRICS_ENABLED=false`. Aggregates are at `GET /api/v1/metrics/summary`, which requires login.
 
-## 7. Policy recommendations
+## 8. Policy recommendations
 * Disable browser dictation by policy where speech must not leave the device (it uses Google/Microsoft cloud services).
 * Enforce full-disk encryption on endpoints, and encourage users to set a passphrase (Engine Diagnostics → Privacy lock). Without one, local chat history is stored unencrypted.
 * On shared machines, train users to use **Erase all local chat history** in *Engine Diagnostics*.

@@ -5,6 +5,7 @@
 export const PERSONAS = [
   {
     id: "personal_vault",
+    userType: "personal", // account user type (backend app/models.py USER_TYPES)
     name: "Personal Vault Assistant",
     shortName: "Personal Vault",
     audience: "You & your household",
@@ -49,6 +50,7 @@ Maintain strict confidentiality, empathy, clarity, and precision. Never invent n
 
   {
     id: "ideashield",
+    userType: "founder", // account user type (backend app/models.py USER_TYPES)
     name: "IdeaShield Workspace",
     shortName: "IdeaShield",
     audience: "Founders & solo",
@@ -93,6 +95,7 @@ Provide sharp, strategic, investor-grade insights while upholding total IP confi
 
   {
     id: "private_ledger",
+    userType: "micro_business", // account user type (backend app/models.py USER_TYPES)
     name: "Private Ledger & Proposal Drafter",
     shortName: "Ledger & Quotes",
     audience: "Small business (1–9)",
@@ -137,6 +140,7 @@ Be exact with financial figures, commercial terms, and professional business cor
 
   {
     id: "sme_hub",
+    userType: "sme", // account user type (backend app/models.py USER_TYPES)
     name: "SME Contract & Meeting Hub",
     shortName: "Contracts & Meetings",
     audience: "Teams (10–250)",
@@ -181,6 +185,7 @@ Deliver structured, executive-ready outputs with strict factual grounding and ve
 
   {
     id: "enterprise_audit",
+    userType: "enterprise", // account user type (backend app/models.py USER_TYPES)
     name: "Enterprise Audit & Matter-Wall",
     shortName: "Audit & Deal Room",
     audience: "Enterprise",
@@ -225,6 +230,7 @@ Maintain strict adherence to corporate governance standards, SOC 2/ISO complianc
 
   {
     id: "clinical_judicial",
+    userType: "institution", // account user type (backend app/models.py USER_TYPES)
     name: "Clinical & Judicial Scribe",
     shortName: "Clinical & Legal Scribe",
     audience: "Healthcare & legal",
@@ -269,6 +275,7 @@ Strictly protect Protected Health Information (PHI) and judicial privilege. Main
 
   {
     id: "safeguard_grant",
+    userType: "charity", // account user type (backend app/models.py USER_TYPES)
     name: "Safeguard & Grant Assistant",
     shortName: "Safeguard & Grants",
     audience: "Charities & NGOs",
@@ -313,6 +320,11 @@ Prioritize beneficiary dignity, donor confidentiality, clarity, and persuasive p
 ];
 
 export const DEFAULT_PERSONA_ID = "personal_vault";
+
+/** The workspace that matches an account's user type (chosen at sign-up). */
+export function personaForUserType(userType) {
+  return PERSONAS.find((p) => p.userType === userType) || PERSONAS[0];
+}
 
 export function getPersona(id) {
   return PERSONAS.find((p) => p.id === id) || PERSONAS[0];
