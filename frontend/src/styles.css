@@ -2657,3 +2657,54 @@ body.theme-light .composer {
   background: var(--danger-soft);
   color: var(--danger);
 }
+
+/* Pricing: monthly / yearly switch */
+.billing-interval {
+  display: flex;
+  width: fit-content;
+  margin: 0 auto 18px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.billing-interval button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.billing-interval button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.billing-save {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pricing-note {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.pricing-note-line {
+  margin: -4px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--success);
+}

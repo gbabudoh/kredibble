@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     SMTP_SSL: bool = False       # port 465 (implicit TLS)
     MAIL_FROM: str = "Kredibble <no-reply@localhost>"
 
+    # Payments (Stripe Checkout + customer portal). Empty STRIPE_SECRET_KEY: upgrades stay manual
+    # (python -m app.admin set-plan). Create the products and prices once with:
+    #   python -m app.billing setup
+    STRIPE_SECRET_KEY: str = ""
+    # Signing secret of the webhook endpoint (Dashboard > Developers > Webhooks, or `stripe listen`).
+    STRIPE_WEBHOOK_SECRET: str = ""
+
     # Server-side parsing is optional (the web client parses in-browser).
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 

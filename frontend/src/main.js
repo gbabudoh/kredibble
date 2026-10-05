@@ -72,6 +72,7 @@ class KredibbleApp {
     this.accountsEnabled = false;
     this.entitlements = UNLIMITED; // what this browser may use; replaced by the server's answer
     this.messagesUsed = 0; // today
+    this.billingInterval = "month"; // pricing window: "month" | "year"
     this.authView = "signin";
     this.resetToken = null;
   }
@@ -165,6 +166,8 @@ class KredibbleApp {
       "open-tier-modal": () => this.showTierModal(true),
       "close-tier-modal": () => this.showTierModal(false),
       "subscribe-tier": (el) => this.handleSubscription(el.dataset.tier),
+      "manage-billing": () => this.manageBilling(),
+      "billing-interval": (el) => this.setBillingInterval(el.dataset.interval),
       "contact-enterprise": () => this.handleEnterpriseContact(),
       "vault-set": () => (this.entitlements.passphrase_lock ? this.openVaultDialog("create") : this.promptUpgrade("Passphrase lock is part of Pro.")),
       "vault-lock": () => this.lock(),
@@ -1552,42 +1555,101 @@ class KredibbleApp {
     if (modal) modal.hidden = !show;
   }
 
+  get hasLiveSubscription() {
+    return ["active", "trialing", "past_due"].includes(this.account?.subscription_status);
+  }
+
   renderTierModal() {
     const current = this.entitlements.plan;
-    const card = ({ plan, name, price, unit = "", desc, features, highlight }) => {
+    const yearly = this.billingInterval === "year";
+    const prices = { pro: { month: 5, year: 48 }, business: { month: 9, year: 86 } };
+    const priceLine = (plan, seat) => {
+      const amount = prices[plan][this.billingInterval];
+      const per = `${seat ? "/ seat " : ""}/ ${yearly ? "year" : "month"}`;
+      const monthly = Math.round((prices[plan].year / 12) * 100) / 100;
+      const note = yearly ? `$${monthly} a month${seat ? " per seat" : ""}, billed yearly` : "";
+      return { price: `$${amount}`, unit: per, note };
+    };
+    const card = ({ plan, name, price, unit = "", note = "", desc, features, highlight }) => {
       const isCurrent = plan === current;
       let button;
-      if (isCurrent) button = `<button class="btn btn-secondary full-width" disabled>Your plan</button>`;
+      if (isCurrent && this.account?.has_billing) button = `<button class="btn btn-secondary full-width" data-action="manage-billing">Manage billing</button>`;
+      else if (isCurrent) button = `<button class="btn btn-secondary full-width" disabled>Your plan</button>`;
       else if (plan === "free") button = this.isGuest
         ? `<button class="btn btn-primary full-width" data-action="open-auth" data-view="register">Create free account</button>`
         : `<button class="btn btn-secondary full-width" disabled>Included</button>`;
       else if (plan === "enterprise") button = `<button class="btn btn-secondary full-width" data-action="contact-enterprise">Contact us</button>`;
+      else if (this.hasLiveSubscription) button = `<button class="btn btn-primary full-width" data-action="manage-billing">Switch to ${name}</button>`;
       else button = `<button class="btn btn-primary full-width" data-action="subscribe-tier" data-tier="${plan}">Upgrade to ${name}</button>`;
       return `
         <div class="pricing-card${isCurrent ? " current" : ""}${highlight && !isCurrent ? " highlighted" : ""}">
           ${isCurrent ? `<div class="pricing-badge">Your plan</div>` : highlight ? `<div class="pricing-badge popular">Most popular</div>` : ""}
           <h4 class="pricing-tier-name">${name}</h4>
           <div class="pricing-price">${price} <span>${unit}</span></div>
+          ${note ? `<div class="pricing-note-line">${note}</div>` : ""}
           <p class="pricing-desc">${desc}</p>
           <ul class="pricing-features">${features.map((f) => `<li>✓ ${f}</li>`).join("")}</ul>
           ${button}
         </div>`;
     };
+    $("billing-interval").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.interval === this.billingInterval)));
     $("pricing-grid").innerHTML = [
-      card({ plan: "free", name: "Free", price: "$0", unit: "/ month", desc: "For trying Kredibble and everyday personal use.",
+      card({ plan: "free", name: "Free", price: "$0", unit: "forever", desc: "For trying Kredibble and everyday personal use.",
         features: ["30 messages a day", "Personal Vault + 1 workspace of your choice", "1 document at a time, up to 10 pages", "Chats saved on this device", "Personal-data scan", "Standard model (1.5B)"] }),
-      card({ plan: "pro", name: "Pro", price: "$5", unit: "/ month · or $48 a year", highlight: true, desc: "For founders, freelancers and small businesses.",
+      card({ plan: "pro", name: "Pro", ...priceLine("pro"), highlight: true, desc: "For founders, freelancers and small businesses.",
         features: ["300 messages a day", "All in-browser workspaces", "Up to 3 documents together, no page limit", "Larger, more accurate models (3B)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
-      card({ plan: "business", name: "Business", price: "$9", unit: "/ seat / month · or $86 a year", desc: "For teams handling contracts, HR and meetings.",
+      card({ plan: "business", name: "Business", ...priceLine("business", true), desc: "For teams handling contracts, HR and meetings.",
         features: ["No daily limit (fair use)", "All workspaces, including team ones", "Search up to 20 documents together", "Optional private server for your team", "Everything in Pro"] }),
       card({ plan: "enterprise", name: "Enterprise & Institution", price: "Custom", desc: "For legal, healthcare, public sector and large companies.",
         features: ["Contract-based limits", "Unlimited documents together", "Dedicated on-premise deployment", "Custom checklists and redaction rules", "Compliance support (SOC 2, HIPAA, NHS)", "Everything in Business"] }),
     ].join("");
   }
 
-  handleSubscription(tier) {
-    this.showTierModal(false);
-    this.toast(`Online payment for ${tier === "pro" ? "Pro" : "Business"} is coming soon. Contact us to upgrade today.`);
+  setBillingInterval(interval) {
+    this.billingInterval = interval;
+    this.renderTierModal();
+  }
+
+  /** Sends the browser to Stripe Checkout. Card details are entered on Stripe, never here. */
+  async handleSubscription(plan) {
+    if (this.isGuest) {
+      this.showTierModal(false);
+      this.toast("Create a free account first, then upgrade.");
+      this.openAuth("register");
+      return;
+    }
+    try {
+      const { url } = await AccountAPI.checkout(plan, this.billingInterval);
+      location.href = url;
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
+
+  /** Stripe's portal: change plan or billing period, update the card, cancel, download invoices. */
+  async manageBilling() {
+    try {
+      const { url } = await AccountAPI.billingPortal();
+      location.href = url;
+    } catch (err) {
+      this.toast(err.message);
+    }
+  }
+
+  /** Back from Stripe Checkout (?checkout=success&session_id=… or ?checkout=cancelled). */
+  async finishCheckout(outcome, sessionId) {
+    if (outcome !== "success") {
+      this.toast("Checkout cancelled. You have not been charged.");
+      return;
+    }
+    try {
+      if (sessionId) await AccountAPI.billingSync(sessionId);
+    } catch (err) {
+      console.warn("Billing sync failed; the webhook will update the plan:", err);
+    }
+    await this.loadAccount();
+    const label = PLAN_LABELS[this.entitlements.plan];
+    this.toast(this.hasLiveSubscription ? `Payment received. Welcome to ${label}!` : "Payment received. Your plan will update in a moment.");
   }
 
   handleEnterpriseContact() {
@@ -1746,9 +1808,14 @@ class KredibbleApp {
     const params = new URLSearchParams(location.search);
     const verify = params.get("verify");
     const reset = params.get("reset");
-    if (!verify && !reset) return;
+    const checkout = params.get("checkout");
+    if (!verify && !reset && !checkout) return;
     history.replaceState(null, "", location.pathname);
     if (!this.accountsEnabled) return;
+    if (checkout) {
+      await this.finishCheckout(checkout, params.get("session_id"));
+      return;
+    }
     if (reset) {
       this.resetToken = reset;
       this.openAuth("reset");
@@ -1902,7 +1969,8 @@ class KredibbleApp {
         <span class="setting-value">${escapeHtml(account.email)}${account.email_verified ? "" : ` <span class="tag warn">Not confirmed</span>`}</span>
       </div>
       ${account.email_verified ? "" : `<p class="settings-note">Check your inbox for the confirmation link. <button class="link-btn" data-action="resend-verification">Send it again</button></p>`}
-      <div class="setting-row"><span class="setting-label">Plan</span><span class="setting-value">${escapeHtml(PLAN_LABELS[account.plan] || account.plan)}</span></div>
+      <div class="setting-row"><span class="setting-label">Plan</span><span class="setting-value">${escapeHtml(PLAN_LABELS[account.plan] || account.plan)}${this.billingSummary(account)}</span></div>
+      ${account.subscription_status === "past_due" ? '<p class="settings-note warn-text">Your last payment failed. Update your card in Manage billing to keep your plan.</p>' : ""}
       <div class="setting-row">
         <label class="setting-label" for="acct-name">Name</label>
         <input class="input input-sm" id="acct-name" maxlength="80" autocomplete="name" value="${escapeHtml(account.display_name || "")}" placeholder="Optional">
@@ -1913,9 +1981,18 @@ class KredibbleApp {
       </div>
       <div class="settings-actions">
         <button class="btn btn-primary" data-action="save-account">Save changes</button>
+        ${account.has_billing ? '<button class="btn" data-action="manage-billing">Manage billing</button>' : '<button class="btn" data-action="open-tier-modal">See plans</button>'}
         <button class="btn" data-action="sign-out">Sign out</button>
         <button class="btn btn-link-danger" data-action="delete-account">Delete account</button>
       </div>`;
+  }
+
+  /** " · monthly, renews 5 Nov 2026" / " · ends 5 Nov 2026" for a paid plan. */
+  billingSummary(account) {
+    if (!account.subscription_renews_at || !this.hasLiveSubscription) return "";
+    const date = new Date(account.subscription_renews_at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+    const period = account.subscription_interval === "year" ? "yearly" : "monthly";
+    return account.subscription_cancel_at_period_end ? ` · ends ${date}` : ` · ${period}, renews ${date}`;
   }
 
   async saveAccount() {

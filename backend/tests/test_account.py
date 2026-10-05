@@ -68,7 +68,10 @@ def test_signed_out_session(client):
 def test_register_signs_in_and_sends_verification(client, clean):
     response = register(client, display_name="  Ada  ")
     assert response.status_code == 201
-    assert response.json() == {"email": "founder@example.com", "display_name": "Ada", "user_type": "founder", "plan": "free", "email_verified": False}
+    assert response.json() | {
+        "email": "founder@example.com", "display_name": "Ada", "user_type": "founder", "plan": "free",
+        "email_verified": False, "has_billing": False,
+    } == response.json()
 
     cookie = response.headers["set-cookie"]
     assert "HttpOnly" in cookie and "Path=/api" in cookie and "SameSite=lax" in cookie

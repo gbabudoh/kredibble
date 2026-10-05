@@ -95,6 +95,16 @@ The AI runs in the browser, so limits are enforced by the web client; the server
 
 Sessions are httpOnly cookies scoped to `/api`, marked `Secure` except on plain-HTTP `localhost`. Sign-in, sign-up and reset requests are rate-limited per process; with several workers, add a limit at the reverse proxy too.
 
+### Payments (Stripe)
+Customers pay on Stripe Checkout and change or cancel in the Stripe customer portal; card details never reach this server. Prices: Pro $5 a month or $48 a year, Business $9 a seat a month or $86 a year (USD, set in `backend/app/billing.py`).
+
+1. In `.env`, set `STRIPE_SECRET_KEY` (start with the `sk_test_...` key).
+2. From `backend/`, run `python -m app.billing setup`. It creates the Pro and Business products, the four prices (found by lookup key, so no price ids go in `.env`) and a customer-portal configuration. Run it again after switching to the live key.
+3. Webhook: in Stripe Dashboard > Developers > Webhooks, add `https://YOUR-DOMAIN/api/v1/billing/webhook` with the events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`. Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Locally, use the Stripe CLI instead: `stripe listen --forward-to localhost:8000/api/v1/billing/webhook`.
+4. Restart the server. Test with card `4242 4242 4242 4242`, any future date and any CVC.
+
+`PUBLIC_BASE_URL` must be the address customers use: Stripe sends them back there after paying. A customer whose card fails keeps their plan while Stripe retries; when the subscription ends they return to Free. Deleting an account cancels its subscription first. Without `STRIPE_SECRET_KEY`, the upgrade buttons explain that online payment is not set up and `python -m app.admin set-plan` still works.
+
 ## 7. Anonymous metrics (optional)
 Users can opt in to sharing anonymous usage metrics. Events contain no text, only task type, check results, ratings, reason codes, model and speed, and are stored in SQLite at `METRICS_DB` (default `backend/data/metrics.sqlite`). In Docker, mount a volume at `/workspace/backend/data` to keep them across restarts. To refuse metrics entirely, set `METRICS_ENABLED=false`. Aggregates are at `GET /api/v1/metrics/summary`, which requires login.
 

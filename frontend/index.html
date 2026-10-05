@@ -236,7 +236,12 @@
         </button>
       </div>
       <div class="modal-body">
+        <div class="billing-interval" id="billing-interval" role="group" aria-label="Billing period">
+          <button type="button" data-action="billing-interval" data-interval="month" aria-pressed="true">Monthly</button>
+          <button type="button" data-action="billing-interval" data-interval="year" aria-pressed="false">Yearly <span class="billing-save">Save 20%</span></button>
+        </div>
         <div class="pricing-grid" id="pricing-grid"></div>
+        <p class="settings-note pricing-note">Payments are handled by Stripe; card details never reach Kredibble. Cancel any time in Manage billing.</p>
       </div>
     </div>
   </div>

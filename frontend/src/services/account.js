@@ -68,4 +68,10 @@ export const AccountAPI = {
   deleteAccount: (password) => request("account/delete", { password }),
   /** Takes one of today's messages: {used, limit}, or AccountError 429 with detail {used, limit}. */
   useMessage: (timeZone) => request("usage/message", { timezone: timeZone }, { timeoutMs: 5000 }),
+  /** Stripe Checkout URL for a plan and billing period ("month" | "year"). */
+  checkout: (plan, interval) => request("billing/checkout", { plan, interval }),
+  /** Stripe customer portal URL: change plan or period, update card, cancel, invoices. */
+  billingPortal: () => request("billing/portal", {}),
+  /** After returning from Checkout: applies the new plan now, even if the webhook is still on its way. */
+  billingSync: (sessionId) => request("billing/sync", { session_id: sessionId }),
 };

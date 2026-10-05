@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base, utcnow
@@ -29,6 +29,13 @@ class User(Base):
     user_type: Mapped[str] = mapped_column(String(32), default="personal")
     plan: Mapped[str] = mapped_column(String(32), default="free")
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Billing (Stripe). The plan above follows the subscription; card details stay with Stripe.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64))
+    subscription_status: Mapped[str | None] = mapped_column(String(32))  # Stripe status, e.g. "active"
+    subscription_interval: Mapped[str | None] = mapped_column(String(8))  # "month" | "year"
+    subscription_renews_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    subscription_cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

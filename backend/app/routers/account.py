@@ -6,13 +6,15 @@ The server knows who someone is and which plan they are on, never what they ask 
 """
 import hashlib
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
+import stripe
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app import billing
 from app.config import settings
 from app.db import SessionLocal, accounts_enabled, as_utc, get_db, utcnow
 from app.mailer import send_email
@@ -96,6 +98,11 @@ class Account(BaseModel):
     user_type: str
     plan: str
     email_verified: bool
+    has_billing: bool = False                   # has a Stripe customer: can open the billing portal
+    subscription_status: str | None = None      # e.g. "active", "past_due"
+    subscription_interval: str | None = None    # "month" | "year"
+    subscription_renews_at: datetime | None = None
+    subscription_cancel_at_period_end: bool = False
 
 
 class SessionState(BaseModel):
@@ -112,6 +119,11 @@ def _account(user: User) -> Account:
         user_type=user.user_type,
         plan=user.plan,
         email_verified=user.email_verified_at is not None,
+        has_billing=bool(user.stripe_customer_id),
+        subscription_status=user.subscription_status,
+        subscription_interval=user.subscription_interval,
+        subscription_renews_at=as_utc(user.subscription_renews_at) if user.subscription_renews_at else None,
+        subscription_cancel_at_period_end=bool(user.subscription_cancel_at_period_end),
     )
 
 
@@ -324,6 +336,10 @@ def delete_account(body: PasswordRequest, request: Request, response: Response, 
     limit(f"delete:{user.id}", 5, 600)
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Wrong password.")
+    try:
+        billing.cancel_now(user)  # never keep charging a deleted account
+    except stripe.error.StripeError:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Could not cancel your subscription, so the account was not deleted. Please try again.")
     db.delete(user)
     db.commit()
     _end_session(response)
