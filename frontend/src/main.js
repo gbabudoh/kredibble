@@ -1595,9 +1595,9 @@ class KredibbleApp {
     $("billing-interval").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.interval === this.billingInterval)));
     $("pricing-grid").innerHTML = [
       card({ plan: "free", name: "Free", price: "$0", unit: "forever", desc: "For trying Kredibble and everyday personal use.",
-        features: ["30 messages a day", "Personal Vault + 1 workspace of your choice", "1 document at a time, up to 10 pages", "Chats saved on this device", "Personal-data scan", "Standard model (1.5B)"] }),
+        features: ["30 messages a day", "Personal Vault + 1 workspace of your choice", "1 document at a time, up to 10 pages", "Chats saved on this device", "Personal-data scan", "Standard models (Qwen3.5 2B)"] }),
       card({ plan: "pro", name: "Pro", ...priceLine("pro"), highlight: true, desc: "For founders, freelancers and small businesses.",
-        features: ["300 messages a day", "All in-browser workspaces", "Up to 3 documents together, no page limit", "Larger, more accurate models (3B)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
+        features: ["300 messages a day", "All in-browser workspaces", "Up to 3 documents together, no page limit", "Larger, more accurate models (Qwen3.5 4B and up)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
       card({ plan: "business", name: "Business", ...priceLine("business", true), desc: "For teams handling contracts, HR and meetings.",
         features: ["No daily limit (fair use)", "All workspaces, including team ones", "Search up to 20 documents together", "Optional private server for your team", "Everything in Pro"] }),
       card({ plan: "enterprise", name: "Enterprise & Institution", price: "Custom", desc: "For legal, healthcare, public sector and large companies.",

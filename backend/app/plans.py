@@ -21,7 +21,7 @@ ALL_WORKSPACES = list(WORKSPACE_FOR_USER_TYPE.values())
 # Workspaces delivered entirely in the browser; the others are the team / self-hosted tiers.
 BROWSER_WORKSPACES = ["personal_vault", "ideashield", "private_ledger", "safeguard_grant"]
 # Models every plan may use; the larger ones need Pro or above.
-SMALL_MODELS = ["qwen2.5-1.5b", "llama3.2-1b"]
+SMALL_MODELS = ["qwen3.5-2b", "qwen3.5-0.8b"]
 
 
 class Entitlements(BaseModel):

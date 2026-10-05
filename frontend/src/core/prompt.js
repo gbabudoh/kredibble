@@ -13,15 +13,16 @@ const BASE_SYSTEM = `You are Kredibble, a private assistant running locally in t
 Be accurate, concise and professional. If you are not sure of something, say so plainly.
 Never invent facts, figures, quotes, citations or legal conclusions.`;
 
-// Layout rules for open questions; document answers keep their own short, cited format.
-const GENERAL_SYSTEM = `${BASE_SYSTEM}
+// Open questions: today's date, so the model flags facts that may have changed since its
+// training, plus layout rules. Document answers keep their own short, cited format.
+export function generalSystem(today = new Date()) {
+  const date = today.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  return `${BASE_SYSTEM}
 
-Format answers so they are easy to scan:
-- Open with a one-sentence direct answer.
-- For steps or several points, use a numbered or bulleted list. Start each item with a short bold label, e.g. "1. **Choose a name:** Check it is available."
-- Put steps in the order they actually happen.
-- Keep paragraphs to two or three sentences. Use "###" headings only in long answers.
-- Do not end with a summary that repeats the list.`;
+Today's date is ${date}. Your training data ends before today. If the answer could have changed since then (who holds an office or job, prices, laws, recent events), end with one short sentence saying it may be out of date.
+
+Answer the question directly in the first sentence. Use a numbered list only for steps or several separate points, starting each item with a short bold label, e.g. "1. **Choose a name:** Check it is available." Keep steps in the order they happen. Keep paragraphs short and do not repeat yourself.`;
+}
 
 const SEARCH_SYSTEM = `${BASE_SYSTEM}
 
@@ -67,7 +68,8 @@ export function planTurn({ history, withDocument, contextWindow, docMode = "sear
     .map(({ role, content }) => ({ role, content: role === "assistant" ? stripCitations(content) : content }));
   const current = turns.pop();
   // Budget against the longer document prompt; assembleMessages picks the one for the mode.
-  const baseWithPersona = personaDirective ? `${GENERAL_SYSTEM}\n\n[Active Workspace Directive: ${personaDirective}]` : GENERAL_SYSTEM;
+  const general = generalSystem();
+  const baseWithPersona = personaDirective ? `${general}\n\n[Active Workspace Directive: ${personaDirective}]` : general;
   const systemBase = withDocument ? longest(SEARCH_SYSTEM, SUMMARY_SYSTEM) : baseWithPersona;
 
   let budget = contextWindow - ANSWER_RESERVE_TOKENS - SAFETY_MARGIN_TOKENS
@@ -121,8 +123,8 @@ function formatExamples(examples) {
  */
 export function assembleMessages(plan, doc = null, examples = []) {
   let system = plan.personaDirective
-    ? `${GENERAL_SYSTEM}\n\n[Active Workspace Directive: ${plan.personaDirective}]`
-    : GENERAL_SYSTEM;
+    ? `${generalSystem()}\n\n[Active Workspace Directive: ${plan.personaDirective}]`
+    : generalSystem();
   if (doc) {
     const summary = doc.mode === "summary" || doc.mode === "sample";
     system = summary ? SUMMARY_SYSTEM : SEARCH_SYSTEM;

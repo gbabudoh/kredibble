@@ -21,7 +21,7 @@ export const UNLIMITED = {
 export const PLAN_LABELS = { guest: "Guest", free: "Free", pro: "Pro", business: "Business", enterprise: "Enterprise", unlimited: "" };
 
 /** Models every plan may use (keys from engine/models.js); larger ones need Pro or above. */
-export const SMALL_MODEL_KEYS = ["qwen2.5-1.5b", "llama3.2-1b"];
+export const SMALL_MODEL_KEYS = ["qwen3.5-2b", "qwen3.5-0.8b"];
 
 export const canUseWorkspace = (ent, id) => !ent.workspaces || ent.workspaces.includes(id);
 export const canUseModel = (ent, key) => ent.large_models || SMALL_MODEL_KEYS.includes(key);

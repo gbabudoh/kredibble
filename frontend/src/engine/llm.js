@@ -5,7 +5,7 @@ import {
   hasModelInCache,
   deleteModelAllInfoInCache,
 } from "@mlc-ai/web-llm";
-import { MODELS, DEFAULT_MODEL_KEY } from "./models.js";
+import { MODELS, DEFAULT_MODEL_KEY, modelThinks } from "./models.js";
 
 const FALLBACK_CONTEXT_WINDOW = 4096;
 
@@ -13,6 +13,33 @@ const FALLBACK_CONTEXT_WINDOW = 4096;
 // Multi-step tasks must stop on these instead of recording them per step.
 const ENGINE_LOST_RE = /already been disposed|ModelNotLoaded|not loaded before|device (?:was |is )?lost|out of memory|GPUDevice/i;
 export const isEngineLost = (err) => ENGINE_LOST_RE.test(err?.message || String(err ?? ""));
+
+/**
+ * Drops a leading <think>…</think> block from a stream, in case a model reasons anyway.
+ * Returns a function that takes each delta and gives back the text to show.
+ */
+export function thinkingFilter() {
+  let buffer = "";
+  let state = "start"; // start: unsure yet | thinking: inside the block | answer: pass through
+  return (delta) => {
+    if (state === "answer") return delta;
+    buffer += delta;
+    if (state === "start") {
+      const trimmed = buffer.trimStart();
+      if (!trimmed) return "";
+      if ("<think>".startsWith(trimmed.slice(0, 7)) && trimmed.length < 7) return "";
+      if (!trimmed.startsWith("<think>")) {
+        state = "answer";
+        return buffer;
+      }
+      state = "thinking";
+    }
+    const end = buffer.indexOf("</think>");
+    if (end === -1) return "";
+    state = "answer";
+    return buffer.slice(end + "</think>".length).replace(/^\s+/, "");
+  };
+}
 
 export class LocalLLM {
   constructor() {
@@ -105,6 +132,11 @@ export class LocalLLM {
     await deleteModelAllInfoInCache(modelId, this.appConfig);
   }
 
+  /** Qwen3.x writes hidden reasoning first unless asked not to; other models must not get this flag. */
+  noThinking() {
+    return modelThinks(this.loadedModelId) ? { extra_body: { enable_thinking: false } } : {};
+  }
+
   /** Streams completion text deltas. Usage stats land in `this.lastUsage`. */
   async *stream(messages, { temperature = 0.3, maxTokens = 768 } = {}) {
     if (!this.engine || !this.loadedModelId) throw new Error("No model loaded.");
@@ -114,9 +146,11 @@ export class LocalLLM {
       max_tokens: maxTokens,
       stream: true,
       stream_options: { include_usage: true },
+      ...this.noThinking(),
     });
+    const visible = thinkingFilter();
     for await (const chunk of chunks) {
-      const delta = chunk.choices?.[0]?.delta?.content;
+      const delta = visible(chunk.choices?.[0]?.delta?.content ?? "");
       if (delta) yield delta;
       if (chunk.usage) this.lastUsage = chunk.usage;
     }
@@ -135,6 +169,7 @@ export class LocalLLM {
       stream: true,
       stream_options: { include_usage: true },
       response_format: { type: "json_object", schema: JSON.stringify(schema) },
+      ...this.noThinking(),
     });
     let text = "";
     let finish = null;

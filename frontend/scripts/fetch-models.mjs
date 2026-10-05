@@ -4,7 +4,7 @@
 //
 //   cd frontend
 //   node scripts/fetch-models.mjs --out ../models                       # default model (f16 + f32) + embedder
-//   node scripts/fetch-models.mjs --out ../models --models qwen2.5-1.5b,llama3.2-1b --precision f16
+//   node scripts/fetch-models.mjs --out ../models --models qwen3.5-2b,qwen3.5-4b --precision f16
 //
 // Layout written (mirrors what WebLLM requests):
 //   <out>/<model_id>/resolve/main/{mlc-chat-config.json, ndarray-cache.json, tokenizer files, shards}

@@ -51,3 +51,26 @@ describe("list lead-in labels", async () => {
     expect(boldListLeadIns(text)).toBe(text);
   });
 });
+
+describe("open questions know today's date", async () => {
+  const { generalSystem } = await import("../src/core/prompt.js");
+  it("states the date and asks the model to flag facts that may have changed", () => {
+    const prompt = generalSystem(new Date(2026, 9, 5));
+    expect(prompt).toMatch(/Today's date is Monday,? 5 October 2026./);
+    expect(prompt).toMatch(/who holds an office/);
+    expect(prompt).toMatch(/may be out of date/);
+
+  });
+});
+
+describe("hidden reasoning", async () => {
+  const { thinkingFilter } = await import("../src/engine/llm.js");
+  const run = (deltas) => { const f = thinkingFilter(); return deltas.map(f).join(""); };
+  it("drops a leading <think> block, even split across deltas", () => {
+    expect(run(["<thi", "nk>\nweighing options", "…</thi", "nk>\n\nThe answer."])).toBe("The answer.");
+  });
+  it("passes normal answers through untouched", () => {
+    expect(run(["The ", "answer ", "<think> is literal here"])).toBe("The answer <think> is literal here");
+    expect(run(["<", "b>bold</b>"])).toBe("<b>bold</b>");
+  });
+});

@@ -1,37 +1,47 @@
-// Curated WebLLM models that fit integrated / entry-level GPUs.
+// Curated WebLLM models, newest families first, sized for integrated and entry-level GPUs.
 // Each entry maps to a prebuilt MLC model; the f16 variant is used when the
 // adapter supports "shader-f16", otherwise the f32 variant.
+// `thinking`: the model writes hidden reasoning first unless told not to (Qwen3.x); the app
+// turns it off, because a long reasoning preamble is slow on a laptop GPU and not shown anyway.
 export const MODELS = [
   {
-    key: "qwen2.5-1.5b",
-    label: "Qwen2.5 1.5B Instruct (balanced)",
-    f16: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
-    f32: "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+    key: "qwen3.5-2b",
+    label: "Qwen3.5 2B (balanced)",
+    f16: "Qwen3.5-2B-q4f16_1-MLC",
+    f32: "Qwen3.5-2B-q4f32_1-MLC",
+    thinking: true,
   },
   {
-    key: "llama3.2-1b",
-    label: "Llama 3.2 1B Instruct (lightest)",
-    f16: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-    f32: "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    key: "qwen3.5-0.8b",
+    label: "Qwen3.5 0.8B (fastest)",
+    f16: "Qwen3.5-0.8B-q4f16_1-MLC",
+    f32: "Qwen3.5-0.8B-q4f32_1-MLC",
+    thinking: true,
   },
   {
-    key: "llama3.2-3b",
-    label: "Llama 3.2 3B Instruct",
-    f16: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-    f32: "Llama-3.2-3B-Instruct-q4f32_1-MLC",
+    key: "ministral3-3b",
+    label: "Ministral 3 3B",
+    f16: "Ministral-3-3B-Instruct-2512-BF16-q4f16_1-MLC",
+    f32: "Ministral-3-3B-Instruct-2512-BF16-q4f32_1-MLC",
+    thinking: false,
   },
   {
-    key: "qwen2.5-3b",
-    label: "Qwen2.5 3B Instruct (higher quality)",
-    f16: "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-    f32: "Qwen2.5-3B-Instruct-q4f32_1-MLC",
+    key: "qwen3.5-4b",
+    label: "Qwen3.5 4B (higher quality)",
+    f16: "Qwen3.5-4B-q4f16_1-MLC",
+    f32: "Qwen3.5-4B-q4f32_1-MLC",
+    thinking: true,
   },
   {
-    key: "phi3.5-mini",
-    label: "Phi-3.5 mini (dedicated GPU)",
-    f16: "Phi-3.5-mini-instruct-q4f16_1-MLC",
-    f32: "Phi-3.5-mini-instruct-q4f32_1-MLC",
+    key: "qwen3.5-9b",
+    label: "Qwen3.5 9B (dedicated GPU)",
+    f16: "Qwen3.5-9B-q4f16_1-MLC",
+    f32: "Qwen3.5-9B-q4f32_1-MLC",
+    thinking: true,
   },
 ];
 
-export const DEFAULT_MODEL_KEY = "qwen2.5-1.5b";
+export const DEFAULT_MODEL_KEY = "qwen3.5-2b";
+
+/** Whether a loaded model id belongs to a model that thinks before answering. */
+export const modelThinks = (modelId) => MODELS.some((m) => m.thinking && (m.f16 === modelId || m.f32 === modelId));

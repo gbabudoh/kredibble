@@ -62,7 +62,7 @@ Then open `http://127.0.0.1:8000`.
    ```bash
    cd frontend && npm ci
    node scripts/fetch-models.mjs --out ../models                                   # default model, f16 + f32, plus embedder
-   node scripts/fetch-models.mjs --out ../models --models qwen2.5-1.5b,llama3.2-1b    # several models
+   node scripts/fetch-models.mjs --out ../models --models qwen3.5-2b,qwen3.5-4b         # several models
    ```
    Include `--precision f32` (on by default) for GPUs without `shader-f16`.
 2. Copy the `models/` folder to the server.
