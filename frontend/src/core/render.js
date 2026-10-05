@@ -16,8 +16,21 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
+// "1. Choose a name: ..." becomes "1. **Choose a name:** ..." so list items scan by their label.
+// Short labels only (up to six words, starting with a capital), never inside code fences.
+const LEAD_IN_RE = /^(\s*(?:\d+[.)]|[-*+])\s+)([A-Z][^:*_`[\]\n]{0,58}?):(?=\s)/gm;
+
+export function boldListLeadIns(text) {
+  return text
+    .split(/(```[\s\S]*?(?:```|$))/)
+    .map((part, i) => (i % 2 ? part : part.replace(LEAD_IN_RE, (match, marker, label) =>
+      label.trim().split(/\s+/).length <= 6 ? `${marker}**${label}:**` : match)))
+    .join("");
+}
+
 export function renderMarkdown(text) {
   if (!text) return "";
+  text = boldListLeadIns(text);
   // ALLOW_DATA_ATTR: false — the app dispatches clicks by data-action, so a model-emitted
   // <button data-action="purge-history"> would otherwise become a working app control.
   return DOMPurify.sanitize(marked.parse(text), {

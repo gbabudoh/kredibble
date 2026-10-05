@@ -1,4 +1,5 @@
 // Kredibble web client: on-device chat over WebLLM.
+import "@fontsource-variable/inter";
 import "./styles.css";
 import { LocalLLM, isEngineLost } from "./engine/llm.js";
 import { loadModelSource } from "./engine/source.js";
@@ -7,6 +8,7 @@ import { ThreadStore, FeedbackStore, setCipher, hasSealedRecords } from "./core/
 import { createVault, recordCipher, unlockVault } from "./core/vault.js";
 import { renderMarkdown, escapeHtml, escapeAutoCitations } from "./core/render.js";
 import { icon } from "./core/icons.js";
+import { PERSONAS, getPersona, DEFAULT_PERSONA_ID } from "./core/personas.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
 import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
@@ -68,13 +70,19 @@ class KredibbleApp {
     this.recognition = null;
     this.engineState = "idle"; // idle | loading | ready | error | unsupported
     this.modelKey = storage.get("kredibble_model", DEFAULT_MODEL_KEY);
+    this.activePersonaId = getPersona(storage.get("kredibble_persona", DEFAULT_PERSONA_ID)).id;
+    this.activeTier = storage.get("kredibble_tier", "free");
     this.ttsEnabled = storage.get("kredibble_tts", "off") === "on";
     this.renderQueued = false;
+    this.stickToBottom = true; // follow new output unless the reader has scrolled up
+    this.renderedTurns = { threadId: null, count: 0 };
   }
 
   async init() {
     this.applyTheme(storage.get("kredibble_theme", "dark"));
     this.updateTTSButton();
+    this.updatePersonaUI();
+    this.renderPersonaModalGrid();
     this.bindEvents();
     this.setupSpeechRecognition();
     const source = await loadModelSource();
@@ -115,6 +123,7 @@ class KredibbleApp {
       "show-telemetry": () => this.showDiagnostics(true),
       "hide-telemetry": () => this.showDiagnostics(false),
       "load-model": () => this.loadModel(),
+      "jump-latest": () => this.scrollToBottom({ force: true, smooth: true }),
       "clear-model-cache": () => this.clearModelCache(),
       "purge-history": () => this.purgeHistory(),
       "pick-file": () => $("file-upload-input").click(),
@@ -137,6 +146,15 @@ class KredibbleApp {
       "export-feedback": () => this.exportFeedback(),
       "pii-scan": () => this.scanPersonalData(),
       "pii-download": () => this.downloadRedacted(),
+      "open-persona-modal": () => this.showPersonaModal(true),
+      "close-persona-modal": () => this.showPersonaModal(false),
+      "select-persona": (el) => this.selectPersona(el.dataset.id),
+      "toggle-workspace-menu": () => this.showWorkspaceMenu($("workspace-menu").hidden),
+      "open-workspace-menu": () => this.openWorkspaceMenuFromTopbar(),
+      "open-tier-modal": () => this.showTierModal(true),
+      "close-tier-modal": () => this.showTierModal(false),
+      "subscribe-tier": (el) => this.handleSubscription(el.dataset.tier),
+      "contact-enterprise": () => this.handleEnterpriseContact(),
       "vault-set": () => this.openVaultDialog("create"),
       "vault-lock": () => this.lock(),
       "vault-remove": () => this.removePassphrase(),
@@ -147,6 +165,7 @@ class KredibbleApp {
     };
 
     document.addEventListener("click", (e) => {
+      if (!$("workspace-menu").hidden && !e.target.closest(".workspace-switcher, .topbar-workspace")) this.showWorkspaceMenu(false);
       const el = e.target.closest("[data-action]");
       if (!el || !actions[el.dataset.action]) return;
       e.preventDefault();
@@ -157,6 +176,24 @@ class KredibbleApp {
     $("telemetry-modal").addEventListener("click", (e) => {
       if (e.target.id === "telemetry-modal") this.showDiagnostics(false);
     });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("workspace-menu").hidden) {
+        this.showWorkspaceMenu(false);
+        $("workspace-btn").focus();
+      }
+    });
+    $("persona-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "persona-modal") this.showPersonaModal(false);
+    });
+    $("tier-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "tier-modal") this.showTierModal(false);
+    });
+
+    $("chat-messages-scroll").addEventListener("scroll", () => {
+      const el = $("chat-messages-scroll");
+      this.stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      $("jump-latest").hidden = this.stickToBottom;
+    }, { passive: true });
 
     const textarea = $("chat-textarea");
     textarea.addEventListener("input", () => this.autoGrow(textarea));
@@ -338,22 +375,34 @@ class KredibbleApp {
   // ---------------------------------------------------------------
   async loadThreads() {
     this.threads = await ThreadStore.all();
-    if (this.threads.length) this.activeThreadId = this.threads[0].id;
-    else this.createThread();
+    this.openLatestThread();
     this.renderThreads();
     this.renderMessages();
   }
 
+  /** Chats belong to one workspace. Chats saved before workspaces existed belong to the default one. */
+  workspaceThreads() {
+    return this.threads.filter((t) => (t.workspaceId || DEFAULT_PERSONA_ID) === this.activePersonaId);
+  }
+
+  /** Opens the newest chat in the active workspace, or starts one. */
+  openLatestThread() {
+    const [latest] = this.workspaceThreads();
+    if (latest) this.activeThreadId = latest.id;
+    else this.createThread();
+  }
+
   createThread() {
     const now = new Date().toISOString();
-    const thread = { id: `thread-${Date.now()}`, title: "New chat", messages: [], createdAt: now, updatedAt: now };
+    const thread = { id: `thread-${Date.now()}`, title: "New chat", workspaceId: this.activePersonaId, messages: [], createdAt: now, updatedAt: now };
     this.threads.unshift(thread);
     this.activeThreadId = thread.id;
     return thread;
   }
 
   getActiveThread() {
-    return this.threads.find((t) => t.id === this.activeThreadId) || this.threads[0];
+    const threads = this.workspaceThreads();
+    return threads.find((t) => t.id === this.activeThreadId) || threads[0];
   }
 
   isNarrow() {
@@ -392,10 +441,7 @@ class KredibbleApp {
     if (this.isStreaming) return;
     await ThreadStore.remove(id);
     this.threads = this.threads.filter((t) => t.id !== id);
-    if (this.activeThreadId === id) {
-      if (this.threads.length) this.activeThreadId = this.threads[0].id;
-      else this.createThread();
-    }
+    if (this.activeThreadId === id) this.openLatestThread();
     this.renderThreads();
     this.renderMessages();
   }
@@ -441,6 +487,7 @@ class KredibbleApp {
       documentOverlap: this.docIndex ? this.docIndex.bm25.search(text, 1).weightedCoverage : 0,
     });
     const useDocument = !!this.docIndex && route.intent !== "general";
+    const persona = getPersona(this.activePersonaId);
 
     let plan;
     try {
@@ -448,6 +495,7 @@ class KredibbleApp {
         history: thread.messages,
         withDocument: useDocument,
         docMode: route.intent === "summary" ? "summary" : "search",
+        personaDirective: persona.systemDirective,
         contextWindow: LocalLLM.contextWindow(this.llm.loadedModelId),
       });
     } catch (err) {
@@ -642,9 +690,12 @@ class KredibbleApp {
     this.renderQueued = true;
     requestAnimationFrame(() => {
       this.renderQueued = false;
-      const boxes = document.querySelectorAll(".msg-turn.assistant .msg-body");
-      const last = boxes[boxes.length - 1];
-      if (last) last.innerHTML = renderMarkdown(text);
+      const turns = document.querySelectorAll(".msg-turn.assistant");
+      const turn = turns[turns.length - 1];
+      if (turn) {
+        turn.classList.add("streaming");
+        turn.querySelector(".msg-body").innerHTML = renderMarkdown(text);
+      }
       this.scrollToBottom();
     });
   }
@@ -660,11 +711,11 @@ class KredibbleApp {
   renderThreads() {
     const container = $("sidebar-threads-container");
     container.replaceChildren();
-    const visible = this.threads.filter((t) => t.messages.length || t.id === this.activeThreadId);
+    const visible = this.workspaceThreads().filter((t) => t.messages.length || t.id === this.activeThreadId);
 
     const heading = document.createElement("div");
-    heading.className = "threads-title";
-    heading.textContent = "Recent";
+    heading.className = "sidebar-section-label";
+    heading.textContent = "Chats";
     container.append(heading);
 
     for (const t of visible) {
@@ -699,13 +750,21 @@ class KredibbleApp {
     const thread = this.getActiveThread();
 
     if (!thread || !thread.messages.length) {
+      const persona = getPersona(this.activePersonaId);
       container.innerHTML = `
         <div class="hero">
-          <span class="hero-icon">${icon("shieldCheck", 26)}</span>
-          <h2 class="hero-title">What can I help with?</h2>
-          <p class="hero-subtitle">Everything runs privately in this browser. Your questions and documents never leave this device.</p>
+          <div class="hero-persona-tag">
+            ${icon(persona.icon, 15)}
+            <span>${persona.tagline}</span>
+          </div>
+          <h2 class="hero-title">${persona.shortName}</h2>
+          <p class="hero-subtitle">${persona.description}</p>
+          <div class="hero-guarantee">
+            ${icon("shieldCheck", 14)}
+            <span>${persona.privacyGuarantee}</span>
+          </div>
           <div class="hero-grid">
-            ${HERO_PROMPTS.map((p) => `
+            ${persona.suggestedPrompts.map((p) => `
               <div class="hero-card" data-action="${p.action || "hero-prompt"}" ${p.prompt ? `data-prompt="${escapeHtml(p.prompt)}"` : ""}>
                 <span class="hero-card-icon">${icon(p.icon, 16)}</span>
                 <span>
@@ -719,8 +778,13 @@ class KredibbleApp {
     }
 
     const lastIndex = thread.messages.length - 1;
+    // Only turns added since the last render animate in; re-renders and thread switches stay still.
+    const seen = this.renderedTurns.threadId === thread.id ? this.renderedTurns.count : thread.messages.length;
+    const grew = thread.messages.length > seen;
+    this.renderedTurns = { threadId: thread.id, count: thread.messages.length };
     container.innerHTML = thread.messages.map((m, i) => {
       const isAssistant = m.role === "assistant";
+      const streaming = isAssistant && this.isStreaming && i === lastIndex && !!m.content;
       const pending = isAssistant && !m.content && this.isStreaming && i === lastIndex;
       const showActions = isAssistant && m.content && !(this.isStreaming && i === lastIndex);
       const body = isAssistant
@@ -728,7 +792,7 @@ class KredibbleApp {
           : showActions ? this.decorateCitations(renderMarkdown(escapeAutoCitations(m.content)), m.meta, i) : renderMarkdown(m.content))
         : `<div class="msg-user-text">${escapeHtml(m.content)}</div>`;
       return `
-        <div class="msg-turn ${m.role}${m.error ? " error" : ""}">
+        <div class="msg-turn ${m.role}${m.error ? " error" : ""}${i >= seen ? " enter" : ""}${streaming ? " streaming" : ""}">
           <div class="msg-avatar">${icon("shieldCheck", 15)}</div>
           <div class="msg-content">
             <div class="msg-body">${body}</div>
@@ -746,7 +810,7 @@ class KredibbleApp {
           </div>
         </div>`;
     }).join("");
-    this.scrollToBottom();
+    this.scrollToBottom({ force: grew });
   }
 
   /** Turns [S1] / [S1, S3] markers into clickable chips. Runs on already-sanitised HTML; only inserts digits. */
@@ -822,9 +886,16 @@ class KredibbleApp {
     setTimeout(() => item.classList.remove("flash"), 1200);
   }
 
-  scrollToBottom() {
+  /** Keeps the newest output in view, unless the reader scrolled up (then offers a jump button). */
+  scrollToBottom({ force = false, smooth = false } = {}) {
     const el = $("chat-messages-scroll");
-    el.scrollTop = el.scrollHeight;
+    if (force) this.stickToBottom = true;
+    if (!this.stickToBottom) {
+      $("jump-latest").hidden = false;
+      return;
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    $("jump-latest").hidden = true;
   }
 
   autoGrow(textarea) {
@@ -1299,10 +1370,117 @@ class KredibbleApp {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
   }
+
+  updatePersonaUI() {
+    const persona = getPersona(this.activePersonaId);
+    $("workspace-btn-icon").innerHTML = icon(persona.icon, 16);
+    $("workspace-btn-name").textContent = persona.shortName;
+    $("workspace-btn-audience").textContent = persona.audience;
+    $("topbar-workspace-icon").innerHTML = icon(persona.icon, 14);
+    $("topbar-workspace-name").textContent = persona.shortName;
+    this.renderWorkspaceMenu();
+  }
+
+  renderWorkspaceMenu() {
+    $("workspace-menu-list").innerHTML = PERSONAS.map((p) => {
+      const active = p.id === this.activePersonaId;
+      return `
+        <button class="workspace-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-action="select-persona" data-id="${p.id}">
+          <span class="workspace-icon">${icon(p.icon, 16)}</span>
+          <span class="workspace-text">
+            <span class="workspace-name">${p.shortName}</span>
+            <span class="workspace-audience">${p.audience}</span>
+          </span>
+          ${active ? `<span class="workspace-check">${icon("check", 15)}</span>` : ""}
+        </button>`;
+    }).join("");
+  }
+
+  showWorkspaceMenu(show) {
+    $("workspace-menu").hidden = !show;
+    $("workspace-btn").setAttribute("aria-expanded", String(show));
+    if (show) $("workspace-menu-list").querySelector(".active")?.focus();
+  }
+
+  /** The top-bar chip is only visible while the sidebar is hidden: bring the sidebar back, then open the menu. */
+  openWorkspaceMenuFromTopbar() {
+    if (this.isNarrow()) document.body.classList.add("sidebar-open");
+    else $("app-sidebar").classList.remove("collapsed");
+    this.showWorkspaceMenu(true);
+  }
+
+  showPersonaModal(show) {
+    const modal = $("persona-modal");
+    if (modal) {
+      modal.hidden = !show;
+      if (show) this.renderPersonaModalGrid();
+    }
+  }
+
+  renderPersonaModalGrid() {
+    const container = $("persona-modal-grid");
+    if (!container) return;
+    container.innerHTML = PERSONAS.map((p) => {
+      const isActive = p.id === this.activePersonaId;
+      return `
+        <div class="persona-card ${isActive ? "active" : ""}" data-action="select-persona" data-id="${p.id}">
+          <div class="persona-card-header">
+            <div class="persona-card-icon-title">
+              <span class="persona-card-icon">${icon(p.icon, 18)}</span>
+              <span class="persona-card-title">${p.name}</span>
+            </div>
+            <span class="persona-card-badge">${p.badge}</span>
+          </div>
+          <p class="persona-card-desc">${p.description}</p>
+          <div class="persona-card-guarantee">
+            ${icon("shieldCheck", 13)}
+            <span>${p.deliveryMethod} · ${p.privacyGuarantee}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  /** Switching workspace shows only that workspace's chats and drops the attached document. */
+  selectPersona(personaId) {
+    this.showWorkspaceMenu(false);
+    this.showPersonaModal(false);
+    if (personaId === this.activePersonaId) return;
+    if (this.isStreaming) {
+      this.toast("Wait for the answer to finish before switching workspace.");
+      return;
+    }
+    this.activePersonaId = getPersona(personaId).id;
+    storage.set("kredibble_persona", this.activePersonaId);
+    this.setDocument(null);
+    this.openLatestThread();
+    this.updatePersonaUI();
+    this.renderThreads();
+    this.renderMessages();
+    this.toast(`Switched to ${getPersona(personaId).shortName}`);
+  }
+
+  showTierModal(show) {
+    const modal = $("tier-modal");
+    if (modal) modal.hidden = !show;
+  }
+
+  handleSubscription(tier) {
+    this.showTierModal(false);
+    this.toast(`Stripe Checkout initiated for ${tier.toUpperCase()} tier.`);
+  }
+
+  handleEnterpriseContact() {
+    this.showTierModal(false);
+    this.toast("Enterprise team contacted for custom deployment.");
+  }
 }
 
 const app = new KredibbleApp();
-app.init();
+app.init().catch((err) => {
+  console.error("Startup failed:", err);
+  app.setEngineState("error", `Startup failed: ${errorText(err)}`);
+});
 
 // Support/diagnostics hook: open the app with ?debug to inspect retrieval in the console.
 // Everything it exposes already lives in this browser tab.

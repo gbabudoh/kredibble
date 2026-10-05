@@ -19,6 +19,7 @@ export class LocalLLM {
     this.engine = null;
     this.loadedModelId = null;
     this.gpu = { supported: false, f16: false, description: "Not detected" };
+    this.gpuProbed = false;
     this.lastUsage = null;
     this.appConfig = prebuiltAppConfig;
     this.available = null; // model ids on a self-hosted mirror, or null for public hosts
@@ -36,6 +37,7 @@ export class LocalLLM {
   }
 
   async probeGPU() {
+    this.gpuProbed = true;
     if (!navigator.gpu) {
       this.gpu = { supported: false, f16: false, description: "WebGPU not available in this browser" };
       return this.gpu;
@@ -81,6 +83,7 @@ export class LocalLLM {
   }
 
   async load(modelId, onProgress) {
+    if (!this.gpuProbed) await this.probeGPU();
     if (!this.gpu.supported) throw new Error(this.gpu.description);
     const initProgressCallback = (report) => onProgress?.(report);
 

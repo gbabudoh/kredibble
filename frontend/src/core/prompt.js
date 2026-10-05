@@ -13,6 +13,16 @@ const BASE_SYSTEM = `You are Kredibble, a private assistant running locally in t
 Be accurate, concise and professional. If you are not sure of something, say so plainly.
 Never invent facts, figures, quotes, citations or legal conclusions.`;
 
+// Layout rules for open questions; document answers keep their own short, cited format.
+const GENERAL_SYSTEM = `${BASE_SYSTEM}
+
+Format answers so they are easy to scan:
+- Open with a one-sentence direct answer.
+- For steps or several points, use a numbered or bulleted list. Start each item with a short bold label, e.g. "1. **Choose a name:** Check it is available."
+- Put steps in the order they actually happen.
+- Keep paragraphs to two or three sentences. Use "###" headings only in long answers.
+- Do not end with a summary that repeats the list.`;
+
 const SEARCH_SYSTEM = `${BASE_SYSTEM}
 
 You are given numbered excerpts ("sources") from a document the user loaded, most relevant first. Rules:
@@ -47,8 +57,9 @@ const DOC_HISTORY_TURNS = { search: 2, summary: 0 };
  * @param {boolean} args.withDocument
  * @param {number} args.contextWindow
  * @param {"search"|"summary"} [args.docMode]
+ * @param {string} [args.personaDirective]
  */
-export function planTurn({ history, withDocument, contextWindow, docMode = "search" }) {
+export function planTurn({ history, withDocument, contextWindow, docMode = "search", personaDirective = "" }) {
   // Old [S#] labels point at an earlier turn's sources, so they are stripped from history:
   // left in, the model copies them and they collide with this turn's labels.
   const turns = history
@@ -56,7 +67,8 @@ export function planTurn({ history, withDocument, contextWindow, docMode = "sear
     .map(({ role, content }) => ({ role, content: role === "assistant" ? stripCitations(content) : content }));
   const current = turns.pop();
   // Budget against the longer document prompt; assembleMessages picks the one for the mode.
-  const systemBase = withDocument ? longest(SEARCH_SYSTEM, SUMMARY_SYSTEM) : BASE_SYSTEM;
+  const baseWithPersona = personaDirective ? `${GENERAL_SYSTEM}\n\n[Active Workspace Directive: ${personaDirective}]` : GENERAL_SYSTEM;
+  const systemBase = withDocument ? longest(SEARCH_SYSTEM, SUMMARY_SYSTEM) : baseWithPersona;
 
   let budget = contextWindow - ANSWER_RESERVE_TOKENS - SAFETY_MARGIN_TOKENS
     - estimateTokens(systemBase) - estimateTokens(current.content);
@@ -80,6 +92,7 @@ export function planTurn({ history, withDocument, contextWindow, docMode = "sear
     systemBase,
     keptTurns,
     current,
+    personaDirective,
     droppedTurns: turns.length - keptTurns.length,
     sourceBudget: Math.max(0, budget - used - 40),
   };
@@ -107,10 +120,15 @@ function formatExamples(examples) {
  * @param {Array<{question:string, answer:string}>} [examples] approved answers (few-shot), search mode only
  */
 export function assembleMessages(plan, doc = null, examples = []) {
-  let system = BASE_SYSTEM;
+  let system = plan.personaDirective
+    ? `${GENERAL_SYSTEM}\n\n[Active Workspace Directive: ${plan.personaDirective}]`
+    : GENERAL_SYSTEM;
   if (doc) {
     const summary = doc.mode === "summary" || doc.mode === "sample";
     system = summary ? SUMMARY_SYSTEM : SEARCH_SYSTEM;
+    if (plan.personaDirective) {
+      system += `\n\n[Active Workspace Directive: ${plan.personaDirective}]`;
+    }
     if (!summary && examples.length) system += formatExamples(examples);
     system += `\n\nSOURCES from "${doc.filename}":\n\n${doc.sources.map(formatSource).join("\n\n")}\n\nEND OF SOURCES`;
   }

@@ -34,3 +34,20 @@ describe("automatic citation markers", async () => {
     expect(renderMarkdown("~~real strikethrough~~")).toContain("<del>");
   });
 });
+
+describe("list lead-in labels", async () => {
+  const { boldListLeadIns } = await import("../src/core/render.js");
+  it("bolds a short label at the start of list items", () => {
+    expect(boldListLeadIns("1. Choose a Business Name: Pick one.\n- Pay Taxes: Yearly.")).toBe(
+      "1. **Choose a Business Name:** Pick one.\n- **Pay Taxes:** Yearly.");
+  });
+  it("leaves prose, long clauses, bold labels and code alone", () => {
+    const text = [
+      "Note: not a list item.",
+      "1. **Already bold:** fine.",
+      "2. The company must keep records for at least six full years: always.",
+      "```\n- Key: value\n```",
+    ].join("\n");
+    expect(boldListLeadIns(text)).toBe(text);
+  });
+});
