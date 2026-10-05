@@ -29,7 +29,8 @@ class Entitlements(BaseModel):
     daily_messages: int | None      # None: no daily limit
     workspaces: list[str]
     documents: bool
-    max_document_pages: int | None  # None: no page limit
+    max_documents: int | None       # attached and searched together; None: no limit
+    max_document_pages: int | None  # per document; None: no page limit
     large_models: bool
     save_history: bool
     passphrase_lock: bool
@@ -39,7 +40,7 @@ class Entitlements(BaseModel):
 
 
 GUEST = Entitlements(
-    plan="guest", daily_messages=5, workspaces=["personal_vault"], documents=False, max_document_pages=0,
+    plan="guest", daily_messages=5, workspaces=["personal_vault"], documents=False, max_documents=0, max_document_pages=0,
     large_models=False, save_history=False, passphrase_lock=False, pii_scan=False, pii_redaction=False, checklists=False,
 )
 
@@ -48,12 +49,13 @@ _PAID = dict(documents=True, max_document_pages=None, large_models=True, save_hi
 
 PLANS = {
     "free": Entitlements(
-        plan="free", daily_messages=30, workspaces=[], documents=True, max_document_pages=10,
+        plan="free", daily_messages=30, workspaces=[], documents=True, max_documents=1, max_document_pages=10,
         large_models=False, save_history=True, passphrase_lock=False, pii_scan=True, pii_redaction=False, checklists=False,
     ),
-    "pro": Entitlements(plan="pro", daily_messages=300, workspaces=BROWSER_WORKSPACES, **_PAID),
-    "business": Entitlements(plan="business", daily_messages=None, workspaces=ALL_WORKSPACES, **_PAID),  # fair use
-    "enterprise": Entitlements(plan="enterprise", daily_messages=None, workspaces=ALL_WORKSPACES, **_PAID),
+    "pro": Entitlements(plan="pro", daily_messages=300, workspaces=BROWSER_WORKSPACES, max_documents=3, **_PAID),
+    # Business: multi-file search across a team's contracts and policies; no daily limit (fair use).
+    "business": Entitlements(plan="business", daily_messages=None, workspaces=ALL_WORKSPACES, max_documents=20, **_PAID),
+    "enterprise": Entitlements(plan="enterprise", daily_messages=None, workspaces=ALL_WORKSPACES, max_documents=None, **_PAID),
 }
 
 
@@ -61,8 +63,9 @@ def entitlements_for(user: User | None) -> Entitlements:
     if user is None:
         return GUEST
     plan = PLANS.get(user.plan, PLANS["free"])
-    if plan.plan == "free":
-        # Personal Vault plus the workspace for who the account is for ("1 of your choice").
-        chosen = WORKSPACE_FOR_USER_TYPE.get(user.user_type, "personal_vault")
-        return plan.model_copy(update={"workspaces": list(dict.fromkeys(["personal_vault", chosen]))})
-    return plan
+    # The workspace for who the account is for is always included, so upgrading never takes it
+    # away: Free is Personal Vault plus that one ("1 of your choice"); Pro adds it to the
+    # in-browser set (e.g. an SME account keeps Contracts & Meetings on Pro).
+    chosen = WORKSPACE_FOR_USER_TYPE.get(user.user_type, "personal_vault")
+    base = ["personal_vault"] if plan.plan == "free" else plan.workspaces
+    return plan.model_copy(update={"workspaces": list(dict.fromkeys([*base, chosen]))})

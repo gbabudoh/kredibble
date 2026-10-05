@@ -8,6 +8,7 @@ export const UNLIMITED = {
   daily_messages: null,
   workspaces: null, // null: every workspace
   documents: true,
+  max_documents: null,
   max_document_pages: null,
   large_models: true,
   save_history: true,

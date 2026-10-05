@@ -34,8 +34,13 @@ def test_plan_table():
     assert not free.large_models and not free.checklists and free.pii_scan and not free.pii_redaction
     assert entitlements_for(User(plan="free", user_type="personal")).workspaces == ["personal_vault"]
     pro = entitlements_for(User(plan="pro", user_type="sme"))
-    assert pro.daily_messages == 300 and pro.workspaces == BROWSER_WORKSPACES and pro.large_models and pro.checklists
-    assert entitlements_for(User(plan="business", user_type="sme")).daily_messages is None
+    assert pro.daily_messages == 300 and pro.large_models and pro.checklists
+    assert pro.workspaces == [*BROWSER_WORKSPACES, "sme_hub"]  # upgrading keeps the user's own workspace
+    assert entitlements_for(User(plan="pro", user_type="founder")).workspaces == BROWSER_WORKSPACES
+    assert (free.max_documents, pro.max_documents, pro.max_document_pages) == (1, 3, None)
+    business = entitlements_for(User(plan="business", user_type="sme"))
+    assert business.daily_messages is None and business.max_documents == 20
+    assert entitlements_for(User(plan="enterprise", user_type="sme")).max_documents is None
     assert entitlements_for(User(plan="mystery", user_type="founder")).plan == "free"
 
 

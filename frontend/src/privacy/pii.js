@@ -119,12 +119,12 @@ export function mask(value) {
 /** Scans a document page by page. */
 export function scanDocument(pages) {
   const findings = [];
-  for (const { page, text } of pages) {
-    for (const h of findPII(text)) findings.push({ ...h, page });
+  for (const { page, text, file } of pages) {
+    for (const h of findPII(text)) findings.push({ ...h, page, ...(file ? { file } : {}) });
   }
   const counts = {};
   for (const f of findings) counts[f.type] = (counts[f.type] || 0) + 1;
   return { findings, counts, total: findings.length };
 }
 
-export const redactPages = (pages) => pages.map(({ page, text }) => ({ page, text: redact(text) }));
+export const redactPages = (pages) => pages.map(({ page, text, file }) => ({ page, ...(file ? { file } : {}), text: redact(text) }));

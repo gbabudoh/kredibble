@@ -14,7 +14,7 @@ import { storage } from "./core/storage.js";
 import { UNLIMITED, PLAN_LABELS, GuestCounter, canUseModel, canUseWorkspace, timeZone, workspaceUnlockLabel } from "./core/plans.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
-import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
+import { DocumentIndex, combineDocuments, pageLabel, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
 import { routeMessage } from "./intent/router.js";
 import { runExtraction } from "./structured/extract.js";
 import { runCompliance } from "./structured/compliance.js";
@@ -45,6 +45,7 @@ class KredibbleApp {
     this.llm = new LocalLLM();
     this.threads = [];
     this.activeThreadId = null;
+    this.docs = []; // attached documents; searched together as this.activeDoc
     this.activeDoc = null;
     this.docIndex = null;
     this.docFingerprint = null;
@@ -131,6 +132,7 @@ class KredibbleApp {
       "limit-signin": () => { $("limit-banner").hidden = true; this.openAuth("signin"); },
       "limit-dismiss": () => { $("limit-banner").hidden = true; },
       "remove-doc": () => this.setDocument(null),
+      "remove-doc-file": (el) => this.removeDocument(Number(el.dataset.index)),
       "toggle-voice": () => this.toggleVoice(),
       "send": () => {
         if (!this.isStreaming) return this.sendMessage();
@@ -222,15 +224,15 @@ class KredibbleApp {
     });
 
     $("file-upload-input").addEventListener("change", (e) => {
-      const file = e.target.files?.[0];
+      const files = [...(e.target.files || [])];
       e.target.value = "";
-      if (file) this.handleFile(file);
+      if (files.length) this.handleFiles(files);
     });
     document.body.addEventListener("dragover", (e) => e.preventDefault());
     document.body.addEventListener("drop", (e) => {
       e.preventDefault();
-      const file = e.dataTransfer?.files?.[0];
-      if (file) this.handleFile(file);
+      const files = [...(e.dataTransfer?.files || [])];
+      if (files.length) this.handleFiles(files);
     });
 
     $("vault-form").addEventListener("submit", (e) => {
@@ -315,24 +317,47 @@ class KredibbleApp {
   // ---------------------------------------------------------------
   // Documents (parsed in-browser, never uploaded)
   // ---------------------------------------------------------------
-  async handleFile(file) {
+  /** Reads files in this browser. Plans with several documents add to the set; others replace it. */
+  async handleFiles(files) {
     if (!this.entitlements.documents) {
       this.promptUpgrade("Attaching documents needs a free account.");
       return;
     }
-    $("attached-doc-chip").hidden = false;
-    $("attached-doc-name").textContent = file.name;
-    $("attached-doc-meta").textContent = "(reading…)";
-    try {
-      const doc = await extractDocument(file);
-      this.setDocument(this.documentAllowed(doc) ? doc : null);
-    } catch (err) {
-      this.setDocument(null);
-      this.toast(errorText(err));
+    const max = this.entitlements.max_documents; // null: no limit
+    const keep = max === 1 ? [] : this.docs;
+    const room = max == null ? files.length : max - keep.length;
+    if (room <= 0) {
+      this.promptUpgrade(`Your plan searches up to ${max} documents together.${max < 20 ? " Business searches up to 20." : " Remove one to add another."}`);
+      return;
     }
+    if (files.length > room) this.toast(`Only ${room} more document${room === 1 ? "" : "s"} fit${room === 1 ? "s" : ""} your plan; the rest were skipped.`);
+
+    $("attached-doc-chip").hidden = false;
+    $("attached-doc-meta").textContent = "(reading…)";
+    const added = [];
+    for (const file of files.slice(0, room)) {
+      try {
+        const doc = await extractDocument(file);
+        if (this.documentAllowed(doc)) added.push(doc);
+      } catch (err) {
+        this.toast(`${file.name}: ${errorText(err)}`);
+      }
+    }
+    // Re-adding a file with the same name replaces the earlier copy.
+    this.setDocuments([...keep.filter((d) => !added.some((a) => a.filename === d.filename)), ...added]);
   }
 
   setDocument(doc) {
+    this.setDocuments(doc ? [doc] : []);
+  }
+
+  removeDocument(index) {
+    this.setDocuments(this.docs.filter((_, i) => i !== index));
+  }
+
+  setDocuments(docs) {
+    this.docs = docs;
+    const doc = docs.length ? combineDocuments(docs) : null;
     this.activeDoc = doc;
     this.docIndex = doc ? new DocumentIndex(doc) : null;
     this.docFingerprint = null;
@@ -340,7 +365,7 @@ class KredibbleApp {
     this.semantic = { state: "off", progress: 0 };
     $("attached-doc-chip").hidden = !doc;
     if (doc) {
-      $("attached-doc-name").textContent = doc.filename;
+      this.renderDocNames();
       this.buildSemanticIndex(this.docIndex);
     }
     this.updateDocChip();
@@ -377,6 +402,16 @@ class KredibbleApp {
     if (stillCurrent()) this.updateDocChip();
   }
 
+  renderDocNames() {
+    const name = $("attached-doc-name");
+    if (this.docs.length === 1) {
+      name.textContent = this.docs[0].filename;
+      return;
+    }
+    name.innerHTML = this.docs.map((d, i) => `
+      <span class="doc-file">${escapeHtml(d.filename)}<button class="doc-file-remove" data-action="remove-doc-file" data-index="${i}" title="Remove ${escapeHtml(d.filename)}" aria-label="Remove ${escapeHtml(d.filename)}">${icon("x", 11)}</button></span>`).join("");
+  }
+
   updateDocChip() {
     const doc = this.activeDoc;
     if (!doc) return;
@@ -389,7 +424,8 @@ class KredibbleApp {
       ready: "keyword + semantic search",
       failed: "keyword search (semantic unavailable)",
     }[this.semantic.state];
-    $("attached-doc-meta").textContent = `(${pages} · ${this.docIndex.chunks.length} passages · ${search} · stays on this device)`;
+    const count = this.docs.length > 1 ? `${this.docs.length} documents · ` : "";
+    $("attached-doc-meta").textContent = `(${count}${pages} · ${this.docIndex.chunks.length} passages · ${search} · stays on this device)`;
   }
 
   // ---------------------------------------------------------------
@@ -900,7 +936,7 @@ class KredibbleApp {
     const cited = new Set(v.citedIds);
     const items = meta.sources.map((s) => `
       <div class="source-item${cited.has(s.id) ? " cited" : ""}" data-src-id="${msgIndex}-${s.id}">
-        <div class="source-head"><span class="source-id">${s.id}</span><span>Page ${s.page}</span>${s.section ? `<span>· ${escapeHtml(s.section)}</span>` : ""}${cited.has(s.id) ? "<span>· cited</span>" : ""}</div>
+        <div class="source-head"><span class="source-id">${s.id}</span><span>${escapeHtml(s.file ? `${s.file} · page ${s.page}` : `Page ${s.page}`)}</span>${s.section ? `<span>· ${escapeHtml(s.section)}</span>` : ""}${cited.has(s.id) ? "<span>· cited</span>" : ""}</div>
         <div class="source-text">${escapeHtml(s.text)}</div>
       </div>`).join("");
     return `
@@ -1106,7 +1142,7 @@ class KredibbleApp {
     } else {
       const rows = Object.entries(report.counts).map(([type, count]) => {
         const hits = report.findings.filter((f) => f.type === type);
-        const pages = [...new Set(hits.map((f) => f.page))].slice(0, 8).join(", ");
+        const pages = [...new Set(hits.map((f) => (f.file ? pageLabel(f) : f.page)))].slice(0, 8).join(", ");
         return `| ${PII_LABELS[type]} | ${count} | ${pages} | ${hits.slice(0, 2).map((f) => `\`${mask(f.value)}\``).join(", ")} |`;
       });
       content = [
@@ -1132,9 +1168,9 @@ class KredibbleApp {
   downloadRedacted() {
     const doc = this.activeDoc;
     if (!doc) return;
-    const text = redactPages(doc.pages).map((p) => `--- Page ${p.page} ---\n${p.text}`).join("\n\n");
+    const text = redactPages(doc.pages).map((p) => `--- ${p.file ? `${p.file}, page` : "Page"} ${p.page} ---\n${p.text}`).join("\n\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-    const name = doc.filename.replace(/\.[^.]+$/, "") + ".redacted.txt";
+    const name = (doc.files ? "documents" : doc.filename.replace(/\.[^.]+$/, "")) + ".redacted.txt";
     const a = Object.assign(document.createElement("a"), { href: url, download: name });
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -1540,12 +1576,12 @@ class KredibbleApp {
     $("pricing-grid").innerHTML = [
       card({ plan: "free", name: "Free", price: "$0", unit: "/ month", desc: "For trying Kredibble and everyday personal use.",
         features: ["30 messages a day", "Personal Vault + 1 workspace of your choice", "1 document at a time, up to 10 pages", "Chats saved on this device", "Personal-data scan", "Standard model (1.5B)"] }),
-      card({ plan: "pro", name: "Pro", price: "$19", unit: "/ month", highlight: true, desc: "For founders, freelancers and small businesses.",
-        features: ["300 messages a day", "All in-browser workspaces", "Large documents, no page limit", "Larger, more accurate models (3B)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
-      card({ plan: "business", name: "Business", price: "$49", unit: "/ seat / month", desc: "For teams handling contracts, HR and meetings.",
-        features: ["No daily limit (fair use)", "All workspaces, including team ones", "Multi-file document search", "Optional private server for your team", "Everything in Pro"] }),
+      card({ plan: "pro", name: "Pro", price: "$5", unit: "/ month · or $48 a year", highlight: true, desc: "For founders, freelancers and small businesses.",
+        features: ["300 messages a day", "All in-browser workspaces", "Up to 3 documents together, no page limit", "Larger, more accurate models (3B)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
+      card({ plan: "business", name: "Business", price: "$9", unit: "/ seat / month · or $86 a year", desc: "For teams handling contracts, HR and meetings.",
+        features: ["No daily limit (fair use)", "All workspaces, including team ones", "Search up to 20 documents together", "Optional private server for your team", "Everything in Pro"] }),
       card({ plan: "enterprise", name: "Enterprise & Institution", price: "Custom", desc: "For legal, healthcare, public sector and large companies.",
-        features: ["Contract-based limits", "Dedicated on-premise deployment", "Custom checklists and redaction rules", "Compliance support (SOC 2, HIPAA, NHS)", "Everything in Business"] }),
+        features: ["Contract-based limits", "Unlimited documents together", "Dedicated on-premise deployment", "Custom checklists and redaction rules", "Compliance support (SOC 2, HIPAA, NHS)", "Everything in Business"] }),
     ].join("");
   }
 
@@ -1595,7 +1631,11 @@ class KredibbleApp {
       storage.set("kredibble_model", this.modelKey);
       if (this.llm.loadedModelId) this.loadModel();
     }
-    if (this.activeDoc && !this.documentAllowed(this.activeDoc, { quiet: true })) this.setDocument(null);
+    const maxDocs = ent.max_documents;
+    if (this.docs.length && ((maxDocs != null && this.docs.length > maxDocs) || this.docs.some((d) => !this.documentAllowed(d, { quiet: true })))) {
+      this.setDocument(null);
+    }
+    $("file-upload-input").multiple = maxDocs == null || maxDocs > 1;
     this.updatePersonaUI();
     this.populateModelSelect();
     this.updateVaultDiagnostics();

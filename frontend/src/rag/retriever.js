@@ -1,4 +1,4 @@
-// Hybrid retrieval over one document: BM25 + (optional) embeddings, fused with
+// Hybrid retrieval over one document (or several merged by combineDocuments): BM25 + (optional) embeddings, fused with
 // reciprocal rank fusion, then packed into the prompt's token budget.
 import { chunkPages } from "./chunker.js";
 import { BM25Index } from "./bm25.js";
@@ -63,6 +63,25 @@ function stats(values) {
   const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
   return { mean, std: Math.sqrt(variance) };
 }
+
+/**
+ * Several documents searched as one: pages keep their own numbers and gain `file`, so every
+ * passage, citation and personal-data finding says which document it came from.
+ * One document is returned unchanged.
+ */
+export function combineDocuments(docs) {
+  if (docs.length === 1) return docs[0];
+  return {
+    filename: `${docs.length} documents`,
+    files: docs.map((d) => d.filename),
+    pages: docs.flatMap((d) => d.pages.map((p) => ({ ...p, file: d.filename }))),
+    pageCount: docs.reduce((n, d) => n + d.pageCount, 0),
+    charCount: docs.reduce((n, d) => n + d.charCount, 0),
+  };
+}
+
+/** "p. 4", or "contract.pdf p. 4" when several documents are searched together. */
+export const pageLabel = ({ file, page }) => (file ? `${file} p. ${page}` : `p. ${page}`);
 
 export class DocumentIndex {
   constructor(doc) {
@@ -168,7 +187,7 @@ export class DocumentIndex {
   toSources(indices) {
     return indices.map((index, i) => {
       const c = this.chunks[index];
-      return { id: `S${i + 1}`, index, page: c.page, section: c.section, text: c.text };
+      return { id: `S${i + 1}`, index, page: c.page, ...(c.file ? { file: c.file } : {}), section: c.section, text: c.text };
     });
   }
 }

@@ -64,8 +64,12 @@ function pageUnits(text, sectionState) {
 export function chunkPages(pages) {
   const chunks = [];
   const sectionState = { current: null };
+  let lastFile;
 
-  for (const { page, text } of pages) {
+  // `file` is set when several documents are searched together; chunks keep it for citations.
+  for (const { page, text, file } of pages) {
+    if (file !== lastFile) sectionState.current = null; // headings do not carry into the next file
+    lastFile = file;
     if (!text?.trim()) continue;
     const units = pageUnits(text, sectionState);
     let current = [];
@@ -74,7 +78,7 @@ export function chunkPages(pages) {
 
     const emit = () => {
       if (!current.length) return;
-      chunks.push({ index: chunks.length, page, section, text: current.map((u) => u.text).join(" ") });
+      chunks.push({ index: chunks.length, page, ...(file ? { file } : {}), section, text: current.map((u) => u.text).join(" ") });
     };
 
     for (const unit of units) {

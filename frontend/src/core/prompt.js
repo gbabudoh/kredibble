@@ -99,7 +99,7 @@ export function planTurn({ history, withDocument, contextWindow, docMode = "sear
 }
 
 export function formatSource(source) {
-  const where = [`p. ${source.page}`, source.section].filter(Boolean).join(" · ");
+  const where = [source.file, `p. ${source.page}`, source.section].filter(Boolean).join(" · ");
   return `[${source.id}] (${where})\n${source.text}`;
 }
 
@@ -130,7 +130,10 @@ export function assembleMessages(plan, doc = null, examples = []) {
       system += `\n\n[Active Workspace Directive: ${plan.personaDirective}]`;
     }
     if (!summary && examples.length) system += formatExamples(examples);
-    system += `\n\nSOURCES from "${doc.filename}":\n\n${doc.sources.map(formatSource).join("\n\n")}\n\nEND OF SOURCES`;
+    const origin = doc.sources.some((s) => s.file)
+      ? "several documents (each source names its file; say which document an answer comes from)"
+      : `"${doc.filename}"`;
+    system += `\n\nSOURCES from ${origin}:\n\n${doc.sources.map(formatSource).join("\n\n")}\n\nEND OF SOURCES`;
   }
   return [{ role: "system", content: system }, ...plan.keptTurns, plan.current];
 }
