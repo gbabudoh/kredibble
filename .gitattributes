@@ -1,0 +1,5 @@
+# Keep LF everywhere: run_dev.sh must run on Linux/macOS, and the registry
+# freshness test compares registry.json byte for byte.
+* text=auto eol=lf
+*.png binary
+*.pdf binary

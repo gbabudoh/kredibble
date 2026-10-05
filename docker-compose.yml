@@ -1,0 +1,15 @@
+services:
+  kredibble-core:
+    image: kredibble/platform-core:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env          # SECRET_KEY, KREDIBBLE_USERS, ALLOWED_ORIGINS — see .env.example
+    environment:
+      - DEBUG=false
+    restart: always
+    security_opt:
+      - no-new-privileges:true

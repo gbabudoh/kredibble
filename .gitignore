@@ -1,0 +1,6 @@
+.env
+__pycache__/
+.pytest_cache/
+node_modules/
+# Build output of frontend/ (vite build)
+backend/app/static/

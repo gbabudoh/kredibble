@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kredibble | DataPrivate Enterprise AI</title>
+  <meta name="description" content="Private AI assistant. The language model runs inside your browser on WebGPU; prompts and documents are processed on this device." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2338bdf8'><path d='M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z'/></svg>" />
+</head>
+<body class="theme-dark">
+  <div class="chatgpt-layout">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar" id="app-sidebar">
+      <div class="sidebar-header">
+        <a href="#" class="brand-row" data-action="new-chat">
+          <div class="brand-icon">🛡️</div>
+          <span>Kredibble</span>
+        </a>
+        <button class="btn-sidebar-icon" data-action="toggle-sidebar" title="Close sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button class="btn-new-chat" data-action="new-chat">
+          <div class="new-chat-left">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>New chat</span>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-threads" id="sidebar-threads-container">
+        <!-- Rendered by main.js -->
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="compliance-status-card">
+          <div class="compliance-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>On-device inference</span>
+          </div>
+          <div class="compliance-desc">
+            The model runs in this browser on WebGPU. Prompts and documents are not sent to Kredibble servers.
+          </div>
+        </div>
+
+        <div class="user-profile-row">
+          <div class="user-info">
+            <div class="user-avatar">KD</div>
+            <span class="user-name">Local Session</span>
+          </div>
+          <button class="btn-sidebar-icon" id="theme-btn" data-action="toggle-theme" title="Toggle Light/Dark Theme">☀️</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CHAT AREA -->
+    <main class="main-chat-area">
+
+      <header class="top-navbar">
+        <div class="top-left">
+          <button class="btn-sidebar-icon" id="sidebar-toggle-btn" data-action="toggle-sidebar" title="Toggle Sidebar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+
+          <button class="model-dropdown-pill" data-action="show-telemetry">
+            <span id="model-pill-name">No model loaded</span>
+            <span class="privacy-pill" id="top-status-text">Idle</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <div class="top-right">
+          <button class="btn-top-action" id="tts-toggle-btn" data-action="toggle-tts" title="Read answers aloud">
+            <span id="tts-icon">🔊</span>
+            <span>Voice Out</span>
+          </button>
+
+          <button class="btn-top-action" data-action="show-telemetry" title="Engine diagnostics">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <line x1="9" y1="1" x2="9" y2="4"></line>
+              <line x1="15" y1="1" x2="15" y2="4"></line>
+              <line x1="9" y1="20" x2="9" y2="23"></line>
+              <line x1="15" y1="20" x2="15" y2="23"></line>
+              <line x1="20" y1="9" x2="23" y2="9"></line>
+              <line x1="20" y1="14" x2="23" y2="14"></line>
+              <line x1="1" y1="9" x2="4" y2="9"></line>
+              <line x1="1" y1="14" x2="4" y2="14"></line>
+            </svg>
+            <span id="top-speed-indicator">—</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="chat-messages-scroll" id="chat-messages-scroll">
+        <div class="messages-inner-container" id="messages-container"></div>
+      </div>
+
+      <div class="bottom-dock-container">
+
+        <!-- Engine status / model loader -->
+        <div id="engine-banner" class="engine-banner" hidden>
+          <div class="engine-banner-row">
+            <span id="engine-banner-text">Model not loaded.</span>
+            <button id="engine-banner-btn" class="btn-top-action" data-action="load-model">Load model</button>
+          </div>
+          <div class="engine-progress" id="engine-progress" hidden><div class="engine-progress-bar" id="engine-progress-bar"></div></div>
+        </div>
+
+        <div id="attached-doc-chip" class="attached-doc-chip" hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+          <span id="attached-doc-name"></span>
+          <span id="attached-doc-meta" style="opacity: 0.6; font-size: 0.75rem;"></span>
+          <button class="doc-remove" data-action="remove-doc" title="Remove file">✕</button>
+        </div>
+
+        <div class="chatgpt-input-box" id="chat-input-box">
+          <input type="file" id="file-upload-input" hidden accept=".pdf,.txt,.md,.csv,.json" />
+          <button class="btn-attach" data-action="pick-file" title="Attach a document (read in this browser)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+          </button>
+
+          <div id="voice-wave-container" class="inline-voice-wave" style="display: none;">
+            <div class="voice-wave-bars">
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+            </div>
+            <span class="listening-text">Listening…</span>
+          </div>
+
+          <textarea id="chat-textarea" class="chat-textarea" rows="1" placeholder="Message Kredibble..."></textarea>
+
+          <div class="input-right-buttons">
+            <button id="mic-btn" class="btn-mic-icon" data-action="toggle-voice" title="Dictate (uses the browser's speech service)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </button>
+
+            <button id="send-btn" class="btn-send-round" data-action="send" title="Send Message">
+              <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+              <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+                <rect x="5" y="5" width="14" height="14" rx="2"></rect>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="bottom-disclaimer">
+          🔒 Answers are generated on this device. AI output can be wrong — verify important facts against the source.
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Engine diagnostics modal -->
+  <div id="telemetry-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Engine Diagnostics</h3>
+        <button class="btn-close-modal" data-action="hide-telemetry">✕</button>
+      </div>
+      <div class="diag-grid">
+        <div class="diag-row"><span>GPU adapter</span><span id="diag-adapter">—</span></div>
+        <div class="diag-row"><span>Engine status</span><span id="diag-status">—</span></div>
+        <div class="diag-row">
+          <span>Model</span>
+          <select id="diag-model-select" class="diag-select"></select>
+        </div>
+        <div class="diag-row"><span>Model ID</span><span id="diag-model-id">—</span></div>
+        <div class="diag-row"><span>VRAM required (model spec)</span><span id="diag-vram">—</span></div>
+        <div class="diag-row"><span>Context window</span><span id="diag-context">—</span></div>
+        <div class="diag-row"><span>Last decode speed</span><span id="diag-speed">—</span></div>
+        <div class="diag-row"><span>Time to first token</span><span id="diag-ttft">—</span></div>
+        <div class="diag-row"><span>Prompts sent to server</span><span style="color:var(--success);">None — inference runs in this browser</span></div>
+      </div>
+      <p class="diag-note">
+        Model weights are downloaded once from Hugging Face and cached by the browser. Chat history is stored unencrypted in this browser's IndexedDB.
+      </p>
+      <div class="diag-actions">
+        <button class="btn-top-action" data-action="load-model">Load selected model</button>
+        <button class="btn-top-action" data-action="clear-model-cache">Remove cached model</button>
+        <button class="btn-top-action" data-action="purge-history" style="color: var(--danger); border-color: var(--danger);">
+          Erase all local chat history
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

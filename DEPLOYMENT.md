@@ -1,0 +1,63 @@
+# Kredibble Enterprise Deployment Guide
+
+How to install and run **Kredibble** on corporate networks and SME subnets.
+
+## 1. Architecture in one paragraph
+The **browser** does the AI work. It downloads an open-weight model once, runs it on the GPU via WebGPU, parses documents locally and stores history in IndexedDB. The **FastAPI server** hosts the web app, handles login, and offers an optional authenticated document-parsing API for integrations. The web client never sends prompts, documents or answers to the server.
+
+## 2. Requirements
+
+### 2.1 Server
+* Docker Engine 20.10+, or Python 3.11+ and Node.js 20+ to build from source.
+* Minimal resources (1 vCPU, 512 MB–1 GB RAM). There is no GPU on the server.
+
+### 2.2 Client endpoints
+* **Browser:** Chrome or Edge 121+ with *Use graphics acceleration when available* enabled.
+* **GPU memory** (shared or dedicated) by model:
+
+| Model | Approx. VRAM |
+|---|---|
+| Llama 3.2 1B | 0.9–1.1 GB |
+| Qwen2.5 1.5B (default) | 1.6–1.9 GB |
+| Llama 3.2 3B / Qwen2.5 3B | 2.3–3.0 GB |
+| Phi-3.5 mini | 3.7–5.5 GB |
+
+Integrated GPUs (Intel Iris Xe, AMD Radeon 680M) are fine for the 1B–1.5B models. 3B+ models need a recent integrated GPU with plenty of system RAM, or a dedicated GPU.
+
+### 2.3 Network / firewall
+On first use, each browser downloads model files. Allow HTTPS to:
+* `huggingface.co` and its CDN hosts (`cdn-lfs.huggingface.co`, `cdn-lfs-us-1.hf.co`, `*.hf.co`): model weights
+* `raw.githubusercontent.com`: WebGPU model libraries (`.wasm`)
+
+After that, files are served from the browser cache and inference needs no network. Hosting the weights inside your own network for air-gapped sites is on the roadmap.
+
+## 3. Configuration
+Copy `.env.example` to `.env` and set:
+* `SECRET_KEY`: required, 32+ characters. The server refuses to start without it unless `DEBUG=true`.
+* `KREDIBBLE_USERS`: JSON map of users with PBKDF2 hashes. Generate a hash with `cd backend && python -m app.security hash-password`.
+* `ALLOWED_ORIGINS`: the public URL(s) of your deployment.
+
+Never commit `.env`.
+
+## 4. Run
+
+### Docker (production)
+```bash
+cp .env.example .env   # then edit
+docker compose up -d --build
+```
+Put the container behind a TLS-terminating reverse proxy. WebGPU and service workers need HTTPS on any host other than `localhost`.
+
+### From source (development)
+```powershell
+.\run_dev.ps1          # Windows
+```
+```bash
+./run_dev.sh           # Linux / macOS
+```
+Then open `http://127.0.0.1:8000`.
+
+## 5. Policy recommendations
+* Disable browser dictation by policy where speech must not leave the device (it uses Google/Microsoft cloud services).
+* Enforce full-disk encryption on endpoints. Local chat history isn't encrypted by the app yet.
+* On shared machines, train users to use **Erase all local chat history** in *Engine Diagnostics*.
