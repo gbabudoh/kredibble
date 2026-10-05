@@ -10,6 +10,8 @@ import { renderMarkdown, escapeHtml, escapeAutoCitations } from "./core/render.j
 import { icon } from "./core/icons.js";
 import { PERSONAS, getPersona, personaForUserType, DEFAULT_PERSONA_ID } from "./core/personas.js";
 import { AccountAPI } from "./services/account.js";
+import { storage } from "./core/storage.js";
+import { UNLIMITED, PLAN_LABELS, GuestCounter, canUseModel, canUseWorkspace, timeZone, workspaceUnlockLabel } from "./core/plans.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
 import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
@@ -28,18 +30,6 @@ const $ = (id) => document.getElementById(id);
 // WebLLM worker errors can arrive as strings or plain objects rather than Error instances.
 const errorText = (err) => err?.message || (typeof err === "string" ? err : String(err));
 
-
-const storage = {
-  get(key, fallback = null) {
-    try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
-  },
-  set(key, value) {
-    try { localStorage.setItem(key, value); } catch { /* private mode */ }
-  },
-  remove(key) {
-    try { localStorage.removeItem(key); } catch { /* private mode */ }
-  },
-};
 
 const IDLE_LOCK_MS = 15 * 60 * 1000;
 
@@ -79,6 +69,8 @@ class KredibbleApp {
     this.renderedTurns = { threadId: null, count: 0 };
     this.account = null; // signed-in account (identity and plan only), or null
     this.accountsEnabled = false;
+    this.entitlements = UNLIMITED; // what this browser may use; replaced by the server's answer
+    this.messagesUsed = 0; // today
     this.authView = "signin";
     this.resetToken = null;
   }
@@ -90,17 +82,19 @@ class KredibbleApp {
     this.renderPersonaModalGrid();
     this.bindEvents();
     this.setupSpeechRecognition();
-    this.loadAccount().then(() => this.handleAccountLinks());
     const source = await loadModelSource();
     this.llm.setSource(source);
     if (source.selfHosted) this.embedder.appConfig = source.appConfig;
     this.modelSource = source;
     this.populateModelSelect();
+    // Plan limits decide the workspace, model and history saving, so they come first.
+    await this.loadAccount();
 
     if (this.vaultConfig() || (await hasSealedRecords())) await this.requireUnlock();
     await this.loadThreads();
     this.feedback = await FeedbackStore.all();
     this.startIdleLock();
+    this.handleAccountLinks();
 
     await this.llm.probeGPU();
     if (!this.llm.gpu.supported) {
@@ -132,7 +126,10 @@ class KredibbleApp {
       "jump-latest": () => this.scrollToBottom({ force: true, smooth: true }),
       "clear-model-cache": () => this.clearModelCache(),
       "purge-history": () => this.purgeHistory(),
-      "pick-file": () => $("file-upload-input").click(),
+      "pick-file": () => (this.entitlements.documents ? $("file-upload-input").click() : this.promptUpgrade("Attaching documents needs a free account.")),
+      "limit-action": () => this.limitAction(),
+      "limit-signin": () => { $("limit-banner").hidden = true; this.openAuth("signin"); },
+      "limit-dismiss": () => { $("limit-banner").hidden = true; },
       "remove-doc": () => this.setDocument(null),
       "toggle-voice": () => this.toggleVoice(),
       "send": () => {
@@ -150,8 +147,8 @@ class KredibbleApp {
       "feedback-save": (el) => this.saveFeedbackForm(Number(el.dataset.index)),
       "feedback-cancel": () => { this.feedbackFormFor = null; this.renderMessages(); },
       "export-feedback": () => this.exportFeedback(),
-      "pii-scan": () => this.scanPersonalData(),
-      "pii-download": () => this.downloadRedacted(),
+      "pii-scan": () => (this.entitlements.pii_scan ? this.scanPersonalData() : this.promptUpgrade("The personal-data scan needs a free account.")),
+      "pii-download": () => (this.entitlements.pii_redaction ? this.downloadRedacted() : this.promptUpgrade("Redacted copies are part of Pro.")),
       "open-persona-modal": () => this.showPersonaModal(true),
       "close-persona-modal": () => this.showPersonaModal(false),
       "select-persona": (el) => this.selectPersona(el.dataset.id),
@@ -167,7 +164,7 @@ class KredibbleApp {
       "close-tier-modal": () => this.showTierModal(false),
       "subscribe-tier": (el) => this.handleSubscription(el.dataset.tier),
       "contact-enterprise": () => this.handleEnterpriseContact(),
-      "vault-set": () => this.openVaultDialog("create"),
+      "vault-set": () => (this.entitlements.passphrase_lock ? this.openVaultDialog("create") : this.promptUpgrade("Passphrase lock is part of Pro.")),
       "vault-lock": () => this.lock(),
       "vault-remove": () => this.removePassphrase(),
       "vault-forgot": () => this.eraseLockedData(),
@@ -319,11 +316,16 @@ class KredibbleApp {
   // Documents (parsed in-browser, never uploaded)
   // ---------------------------------------------------------------
   async handleFile(file) {
+    if (!this.entitlements.documents) {
+      this.promptUpgrade("Attaching documents needs a free account.");
+      return;
+    }
     $("attached-doc-chip").hidden = false;
     $("attached-doc-name").textContent = file.name;
     $("attached-doc-meta").textContent = "(reading…)";
     try {
-      this.setDocument(await extractDocument(file));
+      const doc = await extractDocument(file);
+      this.setDocument(this.documentAllowed(doc) ? doc : null);
     } catch (err) {
       this.setDocument(null);
       this.toast(errorText(err));
@@ -493,6 +495,20 @@ class KredibbleApp {
       return;
     }
 
+    const route = routeMessage(text, {
+      hasDocument: !!this.docIndex,
+      documentOverlap: this.docIndex ? this.docIndex.bm25.search(text, 1).weightedCoverage : 0,
+    });
+    // Plan checks come first; a blocked question stays in the input box.
+    if (route.intent === "compliance" && !this.entitlements.checklists) {
+      this.promptUpgrade("Compliance checklists are part of Pro.");
+      return;
+    }
+    if (this.sendPending) return;
+    this.sendPending = true;
+    const allowed = await this.takeMessage().finally(() => { this.sendPending = false; });
+    if (!allowed) return;
+
     textarea.value = "";
     this.autoGrow(textarea);
 
@@ -501,11 +517,6 @@ class KredibbleApp {
 
     const time = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     thread.messages.push({ role: "user", content: text, timestamp: time() });
-
-    const route = routeMessage(text, {
-      hasDocument: !!this.docIndex,
-      documentOverlap: this.docIndex ? this.docIndex.bm25.search(text, 1).weightedCoverage : 0,
-    });
     const useDocument = !!this.docIndex && route.intent !== "general";
     const persona = getPersona(this.activePersonaId);
 
@@ -600,7 +611,7 @@ class KredibbleApp {
     } finally {
       this.setStreaming(false);
       if (!reply.error && reply.content) sendEvent(buildEvent("answer", reply, { latencyMs: performance.now() - startedAt }));
-      await ThreadStore.save(thread);
+      await this.saveThread(thread);
       this.renderAll();
       this.updateDiagnostics();
     }
@@ -737,6 +748,13 @@ class KredibbleApp {
     heading.className = "sidebar-section-label";
     heading.textContent = "Chats";
     container.append(heading);
+
+    if (!this.entitlements.save_history) {
+      const note = document.createElement("p");
+      note.className = "threads-note";
+      note.innerHTML = `New chats aren't saved while signed out. <button class="link-btn" data-action="open-auth" data-view="signin">Sign in</button> to keep them.`;
+      container.append(note);
+    }
 
     for (const t of visible) {
       const item = document.createElement("div");
@@ -929,10 +947,13 @@ class KredibbleApp {
   populateModelSelect() {
     const select = $("diag-model-select");
     const models = this.llm.availableModels();
+    select.replaceChildren();
     for (const m of models) {
       const option = document.createElement("option");
       option.value = m.key;
-      option.textContent = m.label;
+      const allowed = canUseModel(this.entitlements, m.key);
+      option.textContent = allowed ? m.label : `${m.label} · Pro`;
+      option.disabled = !allowed;
       select.append(option);
     }
     // A self-hosted mirror may not include the remembered or default model.
@@ -1104,7 +1125,7 @@ class KredibbleApp {
       role: "assistant", content, timestamp: time,
       meta: { doc: doc.filename, task: { type: "pii", total: report.total, counts: report.counts } },
     });
-    await ThreadStore.save(thread);
+    await this.saveThread(thread);
     this.renderAll();
   }
 
@@ -1261,6 +1282,7 @@ class KredibbleApp {
     const locked = !!this.vaultConfig();
     $("diag-vault").textContent = locked ? "Encrypted with your passphrase (unlocked)" : "Not encrypted";
     $("diag-vault-set").hidden = locked;
+    $("diag-vault-set").textContent = this.entitlements.passphrase_lock ? "Set passphrase" : "Set passphrase · Pro";
     $("diag-vault-lock").hidden = !locked;
     $("diag-vault-remove").hidden = !locked;
   }
@@ -1338,7 +1360,7 @@ class KredibbleApp {
       sendEvent(buildEvent("feedback", message, { rating, reasons: record.reasons }));
       this.toast(rating === "up" ? "Thanks! Saved on this device." : "Thanks. Feedback saved on this device.");
     }
-    await ThreadStore.save(thread);
+    await this.saveThread(thread);
     this.renderMessages();
     this.updateLearningDiagnostics();
   }
@@ -1377,7 +1399,7 @@ class KredibbleApp {
     await FeedbackStore.clear();
     this.feedback = [];
     for (const t of this.threads) for (const m of t.messages) if (m.meta?.feedback) delete m.meta.feedback;
-    await Promise.all(this.threads.filter((t) => t.messages.length).map((t) => ThreadStore.save(t)));
+    await Promise.all(this.threads.filter((t) => t.messages.length).map((t) => this.saveThread(t)));
     this.renderMessages();
     this.updateLearningDiagnostics();
     this.toast("Feedback deleted.");
@@ -1404,14 +1426,17 @@ class KredibbleApp {
   renderWorkspaceMenu() {
     $("workspace-menu-list").innerHTML = PERSONAS.map((p) => {
       const active = p.id === this.activePersonaId;
+      const locked = !canUseWorkspace(this.entitlements, p.id);
+      const marker = active ? `<span class="workspace-check">${icon("check", 15)}</span>`
+        : locked ? `<span class="lock-badge">${icon("lock", 11)}${workspaceUnlockLabel(this.entitlements, p)}</span>` : "";
       return `
-        <button class="workspace-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-action="select-persona" data-id="${p.id}">
+        <button class="workspace-option${active ? " active" : ""}${locked ? " locked" : ""}" role="option" aria-selected="${active}" data-action="select-persona" data-id="${p.id}">
           <span class="workspace-icon">${icon(p.icon, 16)}</span>
           <span class="workspace-text">
             <span class="workspace-name">${p.shortName}</span>
             <span class="workspace-audience">${p.audience}</span>
           </span>
-          ${active ? `<span class="workspace-check">${icon("check", 15)}</span>` : ""}
+          ${marker}
         </button>`;
     }).join("");
   }
@@ -1466,6 +1491,12 @@ class KredibbleApp {
     this.showWorkspaceMenu(false);
     this.showPersonaModal(false);
     if (personaId === this.activePersonaId) return;
+    if (!canUseWorkspace(this.entitlements, personaId)) {
+      const persona = getPersona(personaId);
+      const unlock = workspaceUnlockLabel(this.entitlements, persona);
+      this.promptUpgrade(unlock === "Sign up" ? `${persona.shortName} needs a free account.` : `${persona.shortName} is part of ${unlock}.`);
+      return;
+    }
     if (this.isStreaming) {
       this.toast("Wait for the answer to finish before switching workspace.");
       return;
@@ -1485,9 +1516,42 @@ class KredibbleApp {
     if (modal) modal.hidden = !show;
   }
 
+  renderTierModal() {
+    const current = this.entitlements.plan;
+    const card = ({ plan, name, price, unit = "", desc, features, highlight }) => {
+      const isCurrent = plan === current;
+      let button;
+      if (isCurrent) button = `<button class="btn btn-secondary full-width" disabled>Your plan</button>`;
+      else if (plan === "free") button = this.isGuest
+        ? `<button class="btn btn-primary full-width" data-action="open-auth" data-view="register">Create free account</button>`
+        : `<button class="btn btn-secondary full-width" disabled>Included</button>`;
+      else if (plan === "enterprise") button = `<button class="btn btn-secondary full-width" data-action="contact-enterprise">Contact us</button>`;
+      else button = `<button class="btn btn-primary full-width" data-action="subscribe-tier" data-tier="${plan}">Upgrade to ${name}</button>`;
+      return `
+        <div class="pricing-card${isCurrent ? " current" : ""}${highlight && !isCurrent ? " highlighted" : ""}">
+          ${isCurrent ? `<div class="pricing-badge">Your plan</div>` : highlight ? `<div class="pricing-badge popular">Most popular</div>` : ""}
+          <h4 class="pricing-tier-name">${name}</h4>
+          <div class="pricing-price">${price} <span>${unit}</span></div>
+          <p class="pricing-desc">${desc}</p>
+          <ul class="pricing-features">${features.map((f) => `<li>✓ ${f}</li>`).join("")}</ul>
+          ${button}
+        </div>`;
+    };
+    $("pricing-grid").innerHTML = [
+      card({ plan: "free", name: "Free", price: "$0", unit: "/ month", desc: "For trying Kredibble and everyday personal use.",
+        features: ["30 messages a day", "Personal Vault + 1 workspace of your choice", "1 document at a time, up to 10 pages", "Chats saved on this device", "Personal-data scan", "Standard model (1.5B)"] }),
+      card({ plan: "pro", name: "Pro", price: "$19", unit: "/ month", highlight: true, desc: "For founders, freelancers and small businesses.",
+        features: ["300 messages a day", "All in-browser workspaces", "Large documents, no page limit", "Larger, more accurate models (3B)", "Passphrase-encrypted history", "Redacted copies and compliance checklists"] }),
+      card({ plan: "business", name: "Business", price: "$49", unit: "/ seat / month", desc: "For teams handling contracts, HR and meetings.",
+        features: ["No daily limit (fair use)", "All workspaces, including team ones", "Multi-file document search", "Optional private server for your team", "Everything in Pro"] }),
+      card({ plan: "enterprise", name: "Enterprise & Institution", price: "Custom", desc: "For legal, healthcare, public sector and large companies.",
+        features: ["Contract-based limits", "Dedicated on-premise deployment", "Custom checklists and redaction rules", "Compliance support (SOC 2, HIPAA, NHS)", "Everything in Business"] }),
+    ].join("");
+  }
+
   handleSubscription(tier) {
     this.showTierModal(false);
-    this.toast(`Stripe Checkout initiated for ${tier.toUpperCase()} tier.`);
+    this.toast(`Online payment for ${tier === "pro" ? "Pro" : "Business"} is coming soon. Contact us to upgrade today.`);
   }
 
   handleEnterpriseContact() {
@@ -1498,10 +1562,127 @@ class KredibbleApp {
   // ---------------------------------------------------------------
   // Accounts (identity and plan only; chats stay on this device)
   // ---------------------------------------------------------------
+  /** Reads who is signed in and what their plan allows, then applies it everywhere. */
   async loadAccount() {
-    const { enabled, account } = await AccountAPI.session();
-    this.accountsEnabled = enabled;
-    this.setAccount(account);
+    const session = await AccountAPI.session(timeZone());
+    this.accountsEnabled = session.enabled;
+    // No account database (self-hosted) or no answer from the server: nothing is locked.
+    this.entitlements = session.enabled && session.entitlements ? session.entitlements : UNLIMITED;
+    this.messagesUsed = session.account ? session.messages_used_today ?? 0 : GuestCounter.used();
+    this.setAccount(session.account);
+    this.applyEntitlements();
+  }
+
+  get isGuest() {
+    return this.entitlements.plan === "guest";
+  }
+
+  /** Moves the app inside the plan: allowed workspace and model, menus, counter, pricing. */
+  applyEntitlements() {
+    const ent = this.entitlements;
+    if (!canUseWorkspace(ent, this.activePersonaId)) {
+      this.activePersonaId = ent.workspaces[0] || DEFAULT_PERSONA_ID;
+      storage.set("kredibble_persona", this.activePersonaId);
+      if (this.threads.length || this.activeThreadId) {
+        this.setDocument(null);
+        this.openLatestThread();
+        this.renderThreads();
+        this.renderMessages();
+      }
+    }
+    if (!canUseModel(ent, this.modelKey)) {
+      this.modelKey = DEFAULT_MODEL_KEY;
+      storage.set("kredibble_model", this.modelKey);
+      if (this.llm.loadedModelId) this.loadModel();
+    }
+    if (this.activeDoc && !this.documentAllowed(this.activeDoc, { quiet: true })) this.setDocument(null);
+    this.updatePersonaUI();
+    this.populateModelSelect();
+    this.updateVaultDiagnostics();
+    this.renderThreads();
+    this.renderTierModal();
+    this.updateUsageMeter();
+    if (this.messagesLeft() !== 0) $("limit-banner").hidden = true;
+    const tier = $("top-tier-badge");
+    tier.textContent = PLAN_LABELS[ent.plan] || "";
+    tier.closest(".tier-pill").hidden = ent.plan === "unlimited";
+  }
+
+  /** Messages left today, or null without a daily limit. */
+  messagesLeft() {
+    const limit = this.entitlements.daily_messages;
+    return limit == null ? null : Math.max(0, limit - this.messagesUsed);
+  }
+
+  updateUsageMeter() {
+    const left = this.messagesLeft();
+    const meter = $("usage-meter");
+    meter.hidden = left == null;
+    if (left == null) return;
+    meter.textContent = `${left} of ${this.entitlements.daily_messages} messages left today`;
+    meter.classList.toggle("warn-text", left <= 3);
+  }
+
+  /** Takes one of today's messages before a question goes to the model. */
+  async takeMessage() {
+    const limit = this.entitlements.daily_messages;
+    if (limit == null) return true;
+    if (this.isGuest) {
+      if (GuestCounter.used() >= limit) return this.showLimit();
+      this.messagesUsed = GuestCounter.take();
+    } else {
+      try {
+        this.messagesUsed = (await AccountAPI.useMessage(timeZone())).used;
+      } catch (err) {
+        if (err.status === 429) {
+          this.messagesUsed = err.detail?.used ?? limit;
+          this.updateUsageMeter();
+          return this.showLimit();
+        }
+        if (err.status === 401) await this.loadAccount(); // signed out elsewhere: guest limits apply next time
+        // Server unreachable: the AI runs locally, so let this message through.
+      }
+    }
+    this.updateUsageMeter();
+    return true;
+  }
+
+  showLimit() {
+    const ent = this.entitlements;
+    const text = {
+      guest: `You've used today's ${ent.daily_messages} free messages. Create a free account for 30 a day, or come back tomorrow.`,
+      free: `You've used all ${ent.daily_messages} messages for today. They reset at midnight, or upgrade to Pro for 300 a day.`,
+    }[ent.plan] || `You've used all ${ent.daily_messages} messages for today. They reset at midnight, or move to Business for no daily limit.`;
+    $("limit-banner-text").textContent = text;
+    $("limit-banner-primary").textContent = this.isGuest ? "Create free account" : "See plans";
+    $("limit-banner-secondary").hidden = !this.isGuest;
+    $("limit-banner").hidden = false;
+    return false;
+  }
+
+  /** Explains why something is locked and opens the next step: sign-up for guests, plans otherwise. */
+  promptUpgrade(message) {
+    this.toast(message);
+    if (this.isGuest) this.openAuth("register");
+    else this.showTierModal(true);
+  }
+
+  limitAction() {
+    $("limit-banner").hidden = true;
+    if (this.isGuest) this.openAuth("register");
+    else this.showTierModal(true);
+  }
+
+  /** Free plans read short documents only. Returns false (and explains) when over the limit. */
+  documentAllowed(doc, { quiet = false } = {}) {
+    const max = this.entitlements.max_document_pages;
+    if (max == null || doc.pageCount <= max) return true;
+    if (!quiet) this.promptUpgrade(`This document has ${doc.pageCount} pages. Your plan reads up to ${max}; Pro has no page limit.`);
+    return false;
+  }
+
+  async saveThread(thread) {
+    if (this.entitlements.save_history) await ThreadStore.save(thread);
   }
 
   setAccount(account) {
@@ -1628,7 +1809,8 @@ class KredibbleApp {
     $("auth-error").hidden = true;
     try {
       if (view === "signin") {
-        this.setAccount(await AccountAPI.login(value("auth-email"), $("auth-password").value));
+        await AccountAPI.login(value("auth-email"), $("auth-password").value);
+        await this.loadAccount();
         this.closeAuth();
         this.toast("Signed in.");
       } else if (view === "register") {
@@ -1638,7 +1820,7 @@ class KredibbleApp {
           display_name: value("auth-name") || null,
           user_type: $("auth-type").value,
         });
-        this.setAccount(account);
+        await this.loadAccount();
         this.closeAuth();
         this.selectPersona(personaForUserType(account.user_type).id);
         this.toast("Account created. Check your email to confirm your address.");
@@ -1646,7 +1828,8 @@ class KredibbleApp {
         await AccountAPI.forgotPassword(value("auth-email"));
         this.openAuth("sent");
       } else if (view === "reset") {
-        this.setAccount(await AccountAPI.resetPassword(this.resetToken, $("auth-password").value));
+        await AccountAPI.resetPassword(this.resetToken, $("auth-password").value);
+        await this.loadAccount();
         this.closeAuth();
         this.toast("Password changed. You're signed in.");
       }
@@ -1697,7 +1880,8 @@ class KredibbleApp {
 
   async saveAccount() {
     try {
-      this.setAccount(await AccountAPI.update({ display_name: $("acct-name").value.trim() || null, user_type: $("acct-type").value }));
+      await AccountAPI.update({ display_name: $("acct-name").value.trim() || null, user_type: $("acct-type").value });
+      await this.loadAccount(); // on the free plan the user type decides the second workspace
       this.toast("Account updated.");
     } catch (err) {
       this.toast(err.message);
@@ -1719,7 +1903,7 @@ class KredibbleApp {
     } catch {
       // Signed out locally either way; the server session expires on its own.
     }
-    this.setAccount(null);
+    await this.loadAccount();
     this.toast("Signed out. Your chats stay on this device.");
   }
 
@@ -1728,7 +1912,7 @@ class KredibbleApp {
     if (!password) return;
     try {
       await AccountAPI.deleteAccount(password);
-      this.setAccount(null);
+      await this.loadAccount();
       this.toast("Account deleted.");
     } catch (err) {
       this.toast(err.message);
@@ -1736,7 +1920,6 @@ class KredibbleApp {
   }
 }
 
-const PLAN_LABELS = { free: "Free", pro: "Pro", business: "Business", enterprise: "Enterprise" };
 
 const app = new KredibbleApp();
 app.init().catch((err) => {

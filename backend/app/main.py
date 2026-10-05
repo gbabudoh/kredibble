@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import account, auth, document, metrics
+from app.routers import account, auth, document, metrics, usage
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 REGISTRY_FILE = Path(__file__).parent / "registry" / "registry.json"
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
     app.include_router(account.router, prefix="/api/v1/account", tags=["Accounts"])
+    app.include_router(usage.router, prefix="/api/v1/usage", tags=["Usage limits"])
     app.include_router(document.router, prefix="/api/v1/docs", tags=["Document Parsing"])
     app.include_router(metrics.router, prefix="/api/v1/metrics", tags=["Anonymous Metrics (opt-in)"])
 

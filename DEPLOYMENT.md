@@ -86,6 +86,13 @@ Accounts hold an email, a password hash, a display name, a user type and a plan.
 4. Email: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `MAIL_FROM` for your mail server (port 587 with `SMTP_STARTTLS=true`, or port 465 with `SMTP_SSL=true` and `SMTP_STARTTLS=false`), and `PUBLIC_BASE_URL` to the site's public address so links in emails work. Until `SMTP_HOST` is set, emails are written to the server log instead, which is enough for local testing.
 5. Restart the server.
 
+Plans and daily limits are defined in `backend/app/plans.py` (guest 5 messages a day, Free 30, Pro 300, Business and Enterprise no daily limit). Days follow each user's own time zone. Until payments are connected, change an account's plan from `backend/`:
+```bash
+python -m app.admin set-plan someone@example.com pro      # free | pro | business | enterprise
+python -m app.admin show someone@example.com
+```
+The AI runs in the browser, so limits are enforced by the web client; the server counts signed-in users' messages. Without `DATABASE_URL` there are no plans and nothing is limited.
+
 Sessions are httpOnly cookies scoped to `/api`, marked `Secure` except on plain-HTTP `localhost`. Sign-in, sign-up and reset requests are rate-limited per process; with several workers, add a limit at the reverse proxy too.
 
 ## 7. Anonymous metrics (optional)

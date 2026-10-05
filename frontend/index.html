@@ -106,7 +106,7 @@
         <div class="topbar-right">
           <button class="tier-pill" data-action="open-tier-modal" title="Subscription & Limits">
             <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            <span id="top-tier-badge">Free Forever</span>
+            <span id="top-tier-badge">Plans</span>
           </button>
           <span class="speed-indicator" id="top-speed-indicator" title="Generation speed">—</span>
           <button class="icon-btn" id="tts-toggle-btn" data-action="toggle-tts" title="Read answers aloud" aria-label="Read answers aloud"></button>
@@ -134,6 +134,21 @@
             <button id="engine-banner-btn" class="btn btn-primary" data-action="load-model">Load model</button>
           </div>
           <div class="engine-progress" id="engine-progress" hidden><div class="engine-progress-bar" id="engine-progress-bar"></div></div>
+        </div>
+
+        <!-- Daily message limit reached -->
+        <div id="limit-banner" class="engine-banner limit-banner" role="status" hidden>
+          <div class="engine-banner-row">
+            <span class="engine-banner-icon" aria-hidden="true">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </span>
+            <span class="engine-banner-text" id="limit-banner-text"></span>
+            <button class="btn" id="limit-banner-secondary" data-action="limit-signin">Sign in</button>
+            <button class="btn btn-primary" id="limit-banner-primary" data-action="limit-action">See plans</button>
+            <button class="icon-btn icon-btn-sm" data-action="limit-dismiss" title="Close" aria-label="Close">
+              <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
         </div>
 
         <!-- Attached document -->
@@ -185,7 +200,7 @@
           </div>
         </div>
 
-        <p class="disclaimer">Answers are generated on this device. AI can make mistakes, so check important facts against the source.</p>
+        <p class="disclaimer"><span class="usage-meter" id="usage-meter" hidden></span>Answers are generated on this device. AI can make mistakes, so check important facts against the source.</p>
       </div>
     </main>
   </div>
@@ -213,77 +228,15 @@
     <div class="modal-card tier-modal-card" role="dialog" aria-modal="true" aria-labelledby="tier-modal-title">
       <div class="modal-header">
         <div>
-          <h3 class="modal-title" id="tier-modal-title">Kredibble Plans &amp; Subscriptions</h3>
-          <p class="modal-subtitle">Zero marginal compute cost on-device free forever, plus scalable private cloud power.</p>
+          <h3 class="modal-title" id="tier-modal-title">Plans</h3>
+          <p class="modal-subtitle">On every plan the AI runs on your device: your questions and documents never leave it.</p>
         </div>
         <button class="icon-btn" data-action="close-tier-modal" title="Close" aria-label="Close modal">
           <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       </div>
       <div class="modal-body">
-        <div class="pricing-grid">
-          <!-- Free Forever -->
-          <div class="pricing-card current">
-            <div class="pricing-badge">Active Plan</div>
-            <h4 class="pricing-tier-name">Free Forever</h4>
-            <div class="pricing-price">$0 <span>/ month</span></div>
-            <p class="pricing-desc">Full on-device privacy for personal use and basic document analysis.</p>
-            <ul class="pricing-features">
-              <li>✓ In-Browser WebGPU WebLLM (Qwen 1.5B)</li>
-              <li>✓ On-Device RAG &amp; Semantic Search</li>
-              <li>✓ Single document processing (PDF, CSV, TXT)</li>
-              <li>✓ Local AES-GCM Encrypted Vault</li>
-              <li>✓ Personal Vault &amp; Basic Prompts</li>
-            </ul>
-            <button class="btn btn-secondary full-width" disabled>Current Plan</button>
-          </div>
-
-          <!-- Pro / Solopreneur -->
-          <div class="pricing-card highlighted">
-            <div class="pricing-badge popular">Most Popular</div>
-            <h4 class="pricing-tier-name">Pro / Solopreneur</h4>
-            <div class="pricing-price">$19 <span>/ month</span></div>
-            <p class="pricing-desc">For founders, creators, and professionals needing higher precision.</p>
-            <ul class="pricing-features">
-              <li>✓ High-parameter models (Qwen 3B, Llama 3.2 3B)</li>
-              <li>✓ IdeaShield IP protection workspace</li>
-              <li>✓ Private Ledger &amp; Invoice quote drafter</li>
-              <li>✓ Unlimited local queries &amp; document indexing</li>
-              <li>✓ Few-shot custom examples learning</li>
-            </ul>
-            <button class="btn btn-primary full-width" data-action="subscribe-tier" data-tier="pro">Upgrade with Stripe</button>
-          </div>
-
-          <!-- SME Pro -->
-          <div class="pricing-card">
-            <h4 class="pricing-tier-name">SME Business</h4>
-            <div class="pricing-price">$49 <span>/ seat / mo</span></div>
-            <p class="pricing-desc">For teams managing contracts, HR policies, and meeting transcripts.</p>
-            <ul class="pricing-features">
-              <li>✓ SME Contract &amp; Meeting Hub</li>
-              <li>✓ Multi-document cross-policy search</li>
-              <li>✓ GDPR Art. 28 &amp; NDA automated checklists</li>
-              <li>✓ Meeting audio transcription &amp; action items</li>
-              <li>✓ Optional hybrid private Python server</li>
-            </ul>
-            <button class="btn btn-primary full-width" data-action="subscribe-tier" data-tier="sme">Upgrade with Stripe</button>
-          </div>
-
-          <!-- Enterprise & Institution -->
-          <div class="pricing-card">
-            <h4 class="pricing-tier-name">Enterprise &amp; Institution</h4>
-            <div class="pricing-price">Custom</div>
-            <p class="pricing-desc">For legal firms, clinical health providers, and large enterprises.</p>
-            <ul class="pricing-features">
-              <li>✓ Enterprise Audit &amp; Matter-Wall Isolation</li>
-              <li>✓ Clinical &amp; Judicial Scribe (SOAP Notes, PHI)</li>
-              <li>✓ Dedicated On-Premise Python vLLM Cluster</li>
-              <li>✓ Automated regex + NER de-identification</li>
-              <li>✓ SOC 2, HIPAA &amp; NHS Digital compliance SLA</li>
-            </ul>
-            <button class="btn btn-secondary full-width" data-action="contact-enterprise">Contact Enterprise Sales</button>
-          </div>
-        </div>
+        <div class="pricing-grid" id="pricing-grid"></div>
       </div>
     </div>
   </div>

@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app import ratelimit
 from app.db import Base, SessionLocal, engine
 from app.main import app
-from app.models import AuthSession, EmailToken, User
+from app.models import AuthSession, DailyUsage, EmailToken, User
 from app.routers import account
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -33,7 +33,7 @@ def database():
 def clean(monkeypatch):
     ratelimit.reset()
     with SessionLocal() as db:
-        for table in (EmailToken, AuthSession, User):
+        for table in (DailyUsage, EmailToken, AuthSession, User):
             db.query(table).delete()
         db.commit()
     sent = []
@@ -60,7 +60,9 @@ def test_migration_matches_models():
 
 
 def test_signed_out_session(client):
-    assert client.get("/api/v1/account/me").json() == {"enabled": True, "account": None}
+    data = client.get("/api/v1/account/me").json()
+    assert data["enabled"] is True and data["account"] is None
+    assert data["entitlements"]["plan"] == "guest"
 
 
 def test_register_signs_in_and_sends_verification(client, clean):

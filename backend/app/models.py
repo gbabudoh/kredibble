@@ -1,16 +1,17 @@
 """Account tables. Identity, plan and sign-in state only: no chat or document content."""
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base, utcnow
 
-# Who the account is for. Chosen at sign-up; it picks the default workspace, not what is allowed.
+# Who the account is for. Chosen at sign-up; picks the default workspace (and on the free plan,
+# the one workspace allowed besides Personal Vault; see app/plans.py).
 USER_TYPES = ("personal", "founder", "micro_business", "sme", "enterprise", "institution", "charity")
 
-# What the account pays for. Limits per plan arrive with quotas; everyone starts on free.
+# What the account pays for (limits in app/plans.py). Everyone starts on free.
 PLANS = ("free", "pro", "business", "enterprise")
 
 
@@ -46,6 +47,15 @@ class AuthSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class DailyUsage(Base):
+    """Messages sent per account per day (the user's local calendar day). Counts only, no content."""
+    __tablename__ = "daily_usage"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    messages: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class EmailToken(Base):

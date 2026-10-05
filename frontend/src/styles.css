@@ -2547,3 +2547,71 @@ body.theme-light .composer {
   padding: 7px 12px;
   font-size: 0.88rem;
 }
+
+/* ------------------------------------------------------------------
+   Plan limits: usage meter, limit banner, locks
+   ------------------------------------------------------------------ */
+.usage-meter {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.usage-meter::after {
+  content: " · ";
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.limit-banner {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.limit-banner .engine-banner-icon {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.limit-banner .engine-banner-text {
+  color: var(--text);
+}
+
+.workspace-option.locked .workspace-name,
+.workspace-option.locked .workspace-icon {
+  opacity: 0.6;
+}
+
+.lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.threads-note {
+  margin: 0 6px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+@media (max-width: 600px) {
+  .limit-banner .engine-banner-row {
+    flex-wrap: wrap;
+  }
+
+  .limit-banner .engine-banner-text {
+    flex-basis: calc(100% - 44px);
+  }
+}

@@ -17,6 +17,8 @@ from app.config import settings
 from app.db import SessionLocal, accounts_enabled, as_utc, get_db, utcnow
 from app.mailer import send_email
 from app.models import USER_TYPES, AuthSession, EmailToken, User
+from app.plans import Entitlements, entitlements_for
+from app.quota import local_day, used_on
 from app.ratelimit import client_ip, limit
 from app.security import hash_password, verify_password
 
@@ -99,6 +101,8 @@ class Account(BaseModel):
 class SessionState(BaseModel):
     enabled: bool
     account: Account | None
+    entitlements: Entitlements | None = None  # what this browser may use (guest limits when signed out)
+    messages_used_today: int = 0              # signed-in accounts; guests are counted in the browser
 
 
 def _account(user: User) -> Account:
@@ -204,13 +208,20 @@ def _send_verification(background: BackgroundTasks, db: Session, user: User) -> 
 # --- endpoints --------------------------------------------------------------
 
 @router.get("/me", response_model=SessionState)
-def me(request: Request):
-    """Who is signed in on this browser (account is null when signed out)."""
+def me(request: Request, tz: str | None = None):
+    """Who is signed in on this browser (account is null when signed out), their plan's
+    entitlements and today's message count. `tz` is the browser's IANA time zone.
+    Without an account database there are no plans: entitlements is null (no limits)."""
     if not accounts_enabled():
         return SessionState(enabled=False, account=None)
     with SessionLocal() as db:
         user = current_user(request, db)
-        return SessionState(enabled=True, account=_account(user) if user else None)
+        return SessionState(
+            enabled=True,
+            account=_account(user) if user else None,
+            entitlements=entitlements_for(user),
+            messages_used_today=used_on(db, user, local_day(tz)) if user else 0,
+        )
 
 
 @router.post("/register", response_model=Account, status_code=status.HTTP_201_CREATED, dependencies=[Depends(same_origin)])
