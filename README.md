@@ -22,6 +22,12 @@
 - **Real telemetry**: Decode speed and time-to-first-token come from WebLLM's own usage stats. VRAM figures are the model's published requirement, not a live measurement.
 - **Safe rendering**: Model output is rendered with `marked` + `DOMPurify`. Images and active content are stripped so a malicious document can't make the model exfiltrate data through image URLs.
 - **Local history**: Threads are stored in the browser's IndexedDB, and one click erases all of it.
+- **Feedback**: 👍/👎 on every answer. 👎 asks why (wrong, made up, citation, incomplete, didn't answer) and lets the user type the correct answer. Feedback is stored in this browser only; *Engine Diagnostics* can export it as JSON, including corrections formatted as candidate eval items, or delete it.
+- **Opt-in anonymous metrics** (off by default): task type, check results, ratings, reason codes, model and speed are sent to `/api/v1/metrics`. The schema has no free-text field, every value is an enum, bounded number or pattern-checked ID, and the server rejects unknown fields, so questions, documents and answers cannot be sent. *Engine Diagnostics* shows exactly what an event contains. Aggregates are available at `/api/v1/metrics/summary` (login required).
+- **Evaluation**: `evals/gold.json` is an answer key for two fixture documents.
+  - `npm test` runs the CI part (retrieval, routing, extraction) against measured baselines, so regressions fail CI.
+  - `evals/run-live.mjs` drives the real model in Chrome and scores answers, extraction and compliance.
+- **Approved answers as examples** (experimental, **off by default, not yet measured**): when enabled in *Engine Diagnostics*, answers rated 👍 or corrected guide the style of similar answers. The live eval has a `--fewshot` mode that seeds examples from another document, so it measures both the benefit and whether example facts leak into answers. That comparison hasn't been completed yet, so leave this off until it has.
 
 ### Known limitations (be upfront with customers)
 - **First load downloads model weights** (~0.9–3.7 GB depending on the model) from Hugging Face, plus WebGPU kernels from GitHub. They're cached afterwards. See [DEPLOYMENT.md](DEPLOYMENT.md) for firewall rules.
@@ -98,9 +104,18 @@ UI hot reload: run `npm run dev` in `frontend/` alongside the API and open `http
 ### Tests
 ```bash
 cd backend && python -m pytest tests      # API: auth, uploads, path traversal
-cd frontend && npm test                   # retrieval, verifier, prompt budgeting (Vitest)
+cd frontend && npm test                   # unit tests + CI eval suite against evals/gold.json (Vitest)
 ```
 Open the app with `?debug` to get `window.kredibble` in the console, which helps when inspecting retrieval scores.
+
+### Live evaluation (needs a WebGPU machine)
+```bash
+./run_dev.sh                                  # app on http://127.0.0.1:8000
+cd evals && npm install
+node run-live.mjs --model qwen2.5-1.5b        # writes evals/reports/<time>-<model>.json
+node run-live.mjs --fewshot --only qa         # the approved-examples experiment
+```
+Pass `--profile <short path>` to reuse downloaded models between runs. To regenerate fixture text after changing a fixture PDF, run `cd frontend && node ../evals/fixtures/extract-pages.mjs`.
 
 ### Changing schemas, checklists or router training data
 Edit the Python files in `backend/app/registry/`, then regenerate:

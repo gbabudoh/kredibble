@@ -4,3 +4,8 @@ __pycache__/
 node_modules/
 # Build output of frontend/ (vite build)
 backend/app/static/
+
+# Live eval output (keep committed baselines named baseline-*.json)
+evals/reports/*
+!evals/reports/baseline-*.json
+backend/data/

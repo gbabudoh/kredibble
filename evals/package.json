@@ -1,0 +1,12 @@
+{
+  "name": "kredibble-evals",
+  "private": true,
+  "type": "module",
+  "description": "Live evaluation of the web client with a real on-device model. See run-live.mjs.",
+  "scripts": {
+    "live": "node run-live.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

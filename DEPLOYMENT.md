@@ -57,7 +57,10 @@ Put the container behind a TLS-terminating reverse proxy. WebGPU and service wor
 ```
 Then open `http://127.0.0.1:8000`.
 
-## 5. Policy recommendations
+## 5. Anonymous metrics (optional)
+Users can opt in to sharing anonymous usage metrics. Events contain no text, only task type, check results, ratings, reason codes, model and speed, and are stored in SQLite at `METRICS_DB` (default `backend/data/metrics.sqlite`). In Docker, mount a volume at `/workspace/backend/data` to keep them across restarts. To refuse metrics entirely, set `METRICS_ENABLED=false`. Aggregates are at `GET /api/v1/metrics/summary`, which requires login.
+
+## 6. Policy recommendations
 * Disable browser dictation by policy where speech must not leave the device (it uses Google/Microsoft cloud services).
 * Enforce full-disk encryption on endpoints. Local chat history isn't encrypted by the app yet.
 * On shared machines, train users to use **Erase all local chat history** in *Engine Diagnostics*.

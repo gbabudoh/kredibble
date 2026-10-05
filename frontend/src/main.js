@@ -1,15 +1,18 @@
 // Kredibble web client: on-device chat over WebLLM.
 import "./styles.css";
-import { LocalLLM } from "./engine/llm.js";
+import { LocalLLM, isEngineLost } from "./engine/llm.js";
 import { MODELS, DEFAULT_MODEL_KEY } from "./engine/models.js";
-import { ThreadStore } from "./core/db.js";
+import { ThreadStore, FeedbackStore } from "./core/db.js";
 import { renderMarkdown, escapeHtml } from "./core/render.js";
-import { planTurn, assembleMessages, ANSWER_MAX_TOKENS } from "./core/prompt.js";
+import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
 import { DocumentIndex, chunkIndexText, normalize, retrievalQuery, shouldAbstain } from "./rag/retriever.js";
 import { routeMessage } from "./intent/router.js";
 import { runExtraction } from "./structured/extract.js";
 import { runCompliance } from "./structured/compliance.js";
+import { REASONS, buildRecord, documentFingerprint, selectExamples, toEvalCandidates } from "./learning/feedback.js";
+import { buildEvent, lastEvent, metricsEnabled, sendEvent, setMetricsEnabled } from "./learning/metrics.js";
+import registry from "./registry/registry.json";
 import { Embedder } from "./rag/embedder.js";
 import { groundAnswer, describeIssue, relevanceIssue, stripCitations, NOT_FOUND_TEXT } from "./rag/verify.js";
 
@@ -18,8 +21,6 @@ const $ = (id) => document.getElementById(id);
 // WebLLM worker errors can arrive as strings or plain objects rather than Error instances.
 const errorText = (err) => err?.message || (typeof err === "string" ? err : String(err));
 
-// Errors WebLLM raises once the WebGPU device has been lost or the model was released.
-const GPU_LOST_RE = /already been disposed|ModelNotLoaded|not loaded before|device (?:was |is )?lost|out of memory|GPUDevice/i;
 
 const storage = {
   get(key, fallback = null) {
@@ -44,6 +45,10 @@ class KredibbleApp {
     this.activeThreadId = null;
     this.activeDoc = null;
     this.docIndex = null;
+    this.docFingerprint = null;
+    this.feedback = [];
+    this.feedbackFormFor = null; // message index with the 👎 form open
+    this.useExamples = storage.get("kredibble_fewshot", "off") === "on";
     this.embedder = new Embedder();
     this.semantic = { state: "off", progress: 0 }; // off | loading | indexing | ready | failed
     this.isStreaming = false;
@@ -63,6 +68,7 @@ class KredibbleApp {
     this.populateModelSelect();
 
     await this.loadThreads();
+    this.feedback = await FeedbackStore.all();
 
     await this.llm.probeGPU();
     if (!this.llm.gpu.supported) {
@@ -106,6 +112,12 @@ class KredibbleApp {
       "delete-thread": (el) => this.deleteThread(el.dataset.id),
       "copy": (el) => this.copyMessage(Number(el.dataset.index)),
       "show-source": (el) => this.showSource(el),
+      "feedback-up": (el) => this.rate(Number(el.dataset.index), "up"),
+      "feedback-down": (el) => this.openFeedbackForm(Number(el.dataset.index)),
+      "feedback-save": (el) => this.saveFeedbackForm(Number(el.dataset.index)),
+      "feedback-cancel": () => { this.feedbackFormFor = null; this.renderMessages(); },
+      "export-feedback": () => this.exportFeedback(),
+      "clear-feedback": () => this.clearFeedback(),
       "speak": (el) => this.speak(this.getActiveThread().messages[Number(el.dataset.index)]?.content),
     };
 
@@ -140,6 +152,15 @@ class KredibbleApp {
       e.preventDefault();
       const file = e.dataTransfer?.files?.[0];
       if (file) this.handleFile(file);
+    });
+
+    $("diag-fewshot").addEventListener("change", (e) => {
+      this.useExamples = e.target.checked;
+      storage.set("kredibble_fewshot", this.useExamples ? "on" : "off");
+    });
+    $("diag-metrics").addEventListener("change", (e) => {
+      setMetricsEnabled(e.target.checked);
+      this.updateLearningDiagnostics();
     });
 
     $("diag-model-select").addEventListener("change", (e) => {
@@ -224,6 +245,8 @@ class KredibbleApp {
   setDocument(doc) {
     this.activeDoc = doc;
     this.docIndex = doc ? new DocumentIndex(doc) : null;
+    this.docFingerprint = null;
+    if (doc) documentFingerprint(doc.pages).then((fp) => { if (this.activeDoc === doc) this.docFingerprint = fp; }).catch(() => {});
     this.semantic = { state: "off", progress: 0 };
     $("attached-doc-chip").hidden = !doc;
     if (doc) {
@@ -392,13 +415,17 @@ class KredibbleApp {
     this.renderAll();
 
     this.stopRequested = false;
+    const startedAt = performance.now();
     try {
       if (route.intent === "extract" || route.intent === "compliance") {
         await this.runStructuredTask(route, text, reply);
         return;
       }
 
-      const grounding = useDocument ? await this.retrieveSources(text, thread, plan.sourceBudget, route.intent === "summary") : null;
+      // Approved earlier answers as style examples (experimental, off by default; see evals/).
+      const examples = this.useExamples && useDocument && route.intent === "qa" ? selectExamples(text, this.feedback) : [];
+      const sourceBudget = Math.max(0, plan.sourceBudget - examplesTokens(examples));
+      const grounding = useDocument ? await this.retrieveSources(text, thread, sourceBudget, route.intent === "summary") : null;
 
       if (grounding?.abstain) {
         // Nothing in the document relates to the question: answer without running the model.
@@ -409,7 +436,7 @@ class KredibbleApp {
         return;
       }
 
-      const messages = assembleMessages(plan, grounding && { filename: grounding.filename, sources: grounding.sources, mode: grounding.retrieval.mode });
+      const messages = assembleMessages(plan, grounding && { filename: grounding.filename, sources: grounding.sources, mode: grounding.retrieval.mode }, examples);
       // Document lookups are extractive: greedy decoding keeps answers repeatable.
       const temperature = grounding?.retrieval.mode === "search" ? 0 : 0.3;
       for await (const delta of this.llm.stream(messages, { maxTokens: ANSWER_MAX_TOKENS, temperature })) {
@@ -424,6 +451,7 @@ class KredibbleApp {
         tokensPerSec: usage?.extra?.decode_tokens_per_s ?? null,
         droppedTurns: plan.droppedTurns,
         route: { intent: route.intent, confidence: Number(route.confidence.toFixed(2)), reason: route.reason },
+        examplesUsed: examples.length,
       };
       if (route.intent === "general") {
         reply.meta.doc = this.docIndex.filename;
@@ -445,7 +473,7 @@ class KredibbleApp {
     } catch (err) {
       console.error("Generation failed:", err);
       reply.error = true;
-      if (GPU_LOST_RE.test(errorText(err))) {
+      if (isEngineLost(err)) {
         // The browser reclaimed the GPU (usually memory pressure on integrated graphics).
         // The model is gone; say so instead of pretending the engine is still ready.
         this.llm.discard();
@@ -456,6 +484,7 @@ class KredibbleApp {
       }
     } finally {
       this.setStreaming(false);
+      if (!reply.error && reply.content) sendEvent(buildEvent("answer", reply, { latencyMs: performance.now() - startedAt }));
       await ThreadStore.save(thread);
       this.renderAll();
       this.updateDiagnostics();
@@ -654,9 +683,11 @@ class KredibbleApp {
               <div class="msg-actions">
                 <button class="msg-action-btn" data-action="copy" data-index="${i}" title="Copy response">📋 Copy</button>
                 <button class="msg-action-btn" data-action="speak" data-index="${i}" title="Read aloud">🔊 Read</button>
+                ${m.error ? "" : this.renderRatingButtons(m, i)}
                 ${this.renderMeta(m.meta)}
               </div>
-              ${this.renderGrounding(m.meta, i)}` : ""}
+              ${this.renderGrounding(m.meta, i)}
+              ${this.feedbackFormFor === i ? this.renderFeedbackForm(i) : ""}` : ""}
           </div>
         </div>`;
     }).join("");
@@ -780,7 +811,10 @@ class KredibbleApp {
   }
 
   showDiagnostics(show) {
-    if (show) this.updateDiagnostics();
+    if (show) {
+      this.updateDiagnostics();
+      this.updateLearningDiagnostics();
+    }
     $("telemetry-modal").style.display = show ? "flex" : "none";
   }
 
@@ -871,6 +905,114 @@ class KredibbleApp {
     storage.set("kredibble_theme", theme);
     document.body.className = `theme-${theme}`;
     $("theme-btn").textContent = theme === "dark" ? "☀️" : "🌘";
+  }
+
+  // ---------------------------------------------------------------
+  // Feedback (stored on this device; reused as examples if enabled)
+  // ---------------------------------------------------------------
+  renderRatingButtons(m, i) {
+    const rating = m.meta?.feedback?.rating;
+    return `
+      <button class="msg-action-btn rate${rating === "up" ? " active" : ""}" data-action="feedback-up" data-index="${i}" title="Good answer">👍</button>
+      <button class="msg-action-btn rate${rating === "down" ? " active" : ""}" data-action="feedback-down" data-index="${i}" title="Bad answer: tell us why">👎</button>`;
+  }
+
+  renderFeedbackForm(i) {
+    const current = this.getActiveThread().messages[i]?.meta?.feedback || {};
+    const reasons = REASONS.map((r) => `
+      <label class="fb-reason"><input type="checkbox" name="fb-reason" value="${r.code}"${current.reasons?.includes(r.code) ? " checked" : ""}> ${escapeHtml(r.label)}</label>`).join("");
+    return `
+      <div class="feedback-form" data-feedback-form="${i}">
+        <div class="fb-title">What was wrong?</div>
+        <div class="fb-reasons">${reasons}</div>
+        <textarea class="fb-correction" rows="2" maxlength="1000" placeholder="What should the answer be? (optional, saved on this device only)">${escapeHtml(current.correction || "")}</textarea>
+        <div class="fb-buttons">
+          <button class="btn-top-action" data-action="feedback-cancel">Cancel</button>
+          <button class="btn-top-action" data-action="feedback-save" data-index="${i}">Save feedback</button>
+        </div>
+      </div>`;
+  }
+
+  /** The user message that an assistant reply at `index` answered. */
+  questionFor(thread, index) {
+    for (let j = index - 1; j >= 0; j--) if (thread.messages[j].role === "user") return thread.messages[j].content;
+    return "";
+  }
+
+  openFeedbackForm(index) {
+    this.feedbackFormFor = this.feedbackFormFor === index ? null : index;
+    this.renderMessages();
+    document.querySelector(`[data-feedback-form="${index}"] .fb-correction`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  saveFeedbackForm(index) {
+    const form = document.querySelector(`[data-feedback-form="${index}"]`);
+    const reasons = [...form.querySelectorAll('input[name="fb-reason"]:checked')].map((x) => x.value);
+    const correction = form.querySelector(".fb-correction").value;
+    this.feedbackFormFor = null;
+    return this.rate(index, "down", { reasons, correction });
+  }
+
+  async rate(index, rating, { reasons = [], correction = "" } = {}) {
+    const thread = this.getActiveThread();
+    const message = thread.messages[index];
+    if (!message) return;
+    const id = `${thread.id}:${index}`;
+
+    // Clicking 👍 again removes the rating.
+    if (rating === "up" && message.meta?.feedback?.rating === "up") {
+      delete message.meta.feedback;
+      await FeedbackStore.remove(id).catch(() => {});
+      this.feedback = this.feedback.filter((r) => r.id !== id);
+    } else {
+      const record = buildRecord({
+        threadId: thread.id, messageIndex: index, question: this.questionFor(thread, index), message,
+        rating, reasons, correction, docFingerprint: this.docFingerprint, registryVersion: registry.version,
+      });
+      try {
+        await FeedbackStore.save(record);
+      } catch (err) {
+        this.toast(`Could not save feedback: ${errorText(err)}`);
+        return;
+      }
+      this.feedback = [...this.feedback.filter((r) => r.id !== id), record];
+      message.meta = { ...message.meta, feedback: { rating, reasons: record.reasons, correction: record.correction } };
+      sendEvent(buildEvent("feedback", message, { rating, reasons: record.reasons }));
+      this.toast(rating === "up" ? "Thanks! Saved on this device." : "Thanks. Feedback saved on this device.");
+    }
+    await ThreadStore.save(thread);
+    this.renderMessages();
+    this.updateLearningDiagnostics();
+  }
+
+  updateLearningDiagnostics() {
+    const up = this.feedback.filter((r) => r.rating === "up").length;
+    const down = this.feedback.length - up;
+    const corrected = this.feedback.filter((r) => r.correction).length;
+    $("diag-feedback").textContent = `${this.feedback.length} saved (👍 ${up} · 👎 ${down}, ${corrected} with corrections)`;
+    $("diag-fewshot").checked = this.useExamples;
+    $("diag-metrics").checked = metricsEnabled();
+    const sample = lastEvent() || buildEvent("answer", { meta: { model: this.llm.loadedModelId || "none", route: { intent: "qa" }, verification: { status: "grounded", issues: [] } } }, { latencyMs: 12000 });
+    $("diag-metrics-sample").textContent = JSON.stringify(sample, null, 1);
+  }
+
+  exportFeedback() {
+    const payload = { exportedAt: new Date().toISOString(), registryVersion: registry.version, records: this.feedback, evalCandidates: toEvalCandidates(this.feedback) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: `kredibble-feedback-${new Date().toISOString().slice(0, 10)}.json` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async clearFeedback() {
+    if (!confirm("Delete all feedback saved in this browser?")) return;
+    await FeedbackStore.clear();
+    this.feedback = [];
+    for (const t of this.threads) for (const m of t.messages) if (m.meta?.feedback) delete m.meta.feedback;
+    await Promise.all(this.threads.filter((t) => t.messages.length).map((t) => ThreadStore.save(t)));
+    this.renderMessages();
+    this.updateLearningDiagnostics();
+    this.toast("Feedback deleted.");
   }
 
   toast(message) {

@@ -1,0 +1,56 @@
+{
+  "about": "Answer key for the fixture documents. Used by frontend/tests/eval.test.js (CI, no GPU) and evals/run-live.mjs (real model in Chrome). `expect` lists acceptable substrings (any one, case-insensitive); `gold` is the passage substring retrieval must surface.",
+  "qa": [
+    { "doc": "msa", "q": "What is the liability cap?", "expect": ["2,500,000"], "gold": "2,500,000" },
+    { "doc": "msa", "q": "How many days does the customer have to pay an invoice?", "expect": ["45", "forty-five"], "gold": "forty-five (45)" },
+    { "doc": "msa", "q": "What happens if one side wants to end the deal early?", "expect": ["90", "ninety"], "gold": "ninety (90)" },
+    { "doc": "msa", "q": "How quickly must a data breach be reported?", "expect": ["24", "twenty-four"], "gold": "twenty-four (24)" },
+    { "doc": "msa", "q": "What is the uptime commitment?", "expect": ["99.5"], "gold": "99.5%" },
+    { "doc": "msa", "q": "Which country's law applies to this agreement?", "expect": ["England"], "gold": "England and Wales" },
+    { "doc": "msa", "q": "How long does the contract last?", "expect": ["three (3) years", "3 years", "three years"], "gold": "three (3) years" },
+    { "doc": "msa", "q": "What insurance must the supplier hold?", "expect": ["professional indemnity", "5,000,000"], "gold": "professional indemnity" },
+    { "doc": "msa", "q": "How long must confidential information be kept secret?", "expect": ["five (5) years", "5 years", "five years"], "gold": "five (5) years" },
+    { "doc": "msa", "q": "What late payment interest applies?", "expect": ["4%", "four per cent", "base rate"], "gold": "Bank of England base rate" },
+    { "doc": "msa", "q": "Can we cancel if the supplier seriously breaches the contract?", "expect": ["material breach", "thirty (30)", "30 days"], "gold": "material breach" },
+    { "doc": "msa", "q": "Who has jurisdiction over disputes?", "expect": ["courts of England", "England"], "gold": "exclusive jurisdiction" }
+  ],
+  "unrelated": [
+    { "doc": "msa", "q": "What is the capital of France?" },
+    { "doc": "msa", "q": "Recommend a good pasta recipe." },
+    { "doc": "msa", "q": "Who won the 2018 football world cup?" }
+  ],
+  "routing": [
+    { "doc": "msa", "q": "What is the liability cap?", "intent": "qa" },
+    { "doc": "msa", "q": "Summarise this agreement.", "intent": "summary" },
+    { "doc": "msa", "q": "Extract all amounts and durations.", "intent": "extract" },
+    { "doc": "dpa", "q": "Check this DPA against GDPR Article 28.", "intent": "compliance" },
+    { "doc": "msa", "q": "What is the capital of France?", "intent": "general" },
+    { "doc": "msa", "q": "Who bears the cost of audits?", "intent": "qa" },
+    { "doc": "msa", "q": "What insurance must the supplier hold?", "intent": "qa" },
+    { "doc": "dpa", "q": "Who painted the Mona Lisa?", "intent": "general" }
+  ],
+  "extraction": [
+    {
+      "doc": "msa",
+      "q": "Extract all amounts and durations.",
+      "expect_values": ["forty-five (45) days", "three (3) years", "twelve (12) months", "five (5) years", "twenty-four (24) hours", "£2,500,000", "£5,000,000", "ninety (90) days", "thirty (30) days"]
+    }
+  ],
+  "compliance": [
+    {
+      "doc": "dpa",
+      "q": "Check this DPA against GDPR Article 28.",
+      "checklist": "gdpr_art28",
+      "key": {
+        "a28_instructions": "present",
+        "a28_confidentiality": "present",
+        "a28_security": "present",
+        "a28_subprocessors": "present",
+        "a28_rights": "absent",
+        "a28_breach": "present",
+        "a28_deletion": "absent",
+        "a28_audit": "absent"
+      }
+    }
+  ]
+}

@@ -5,16 +5,19 @@ import registry from "../registry/registry.json";
 import { sourceSupports } from "../rag/verify.js";
 import { formatSource } from "../core/prompt.js";
 import { withSourceEnum } from "./schema.js";
+import { isEngineLost } from "../engine/llm.js";
 
 const SCHEMA = registry.schemas.compliance_finding;
 const SOURCES_PER_ITEM = 3;
-const MAX_OUTPUT_TOKENS = 220;
+// Long clauses quoted in full overflowed 220 tokens and cut the JSON off.
+const MAX_OUTPUT_TOKENS = 400;
 
 export const STATUS_LABEL = {
   addressed: "✅ Addressed",
   partial: "🟡 Partly addressed",
   not_found: "❌ Not found",
   unverified: "⚠ Needs review",
+  error: "⚠ Check failed",
 };
 
 /** Picks the checklist whose keywords appear in the question, else the default. */
@@ -111,13 +114,18 @@ export async function runCompliance({ question, index, llm, embedQuery, onProgre
         { maxTokens: MAX_OUTPUT_TOKENS },
       );
     } catch (err) {
-      finding = { status: "unverified", source: "none", quote: "", note: `Check failed: ${err.message}` };
+      // A lost engine fails every later step too: stop and let the caller report it.
+      if (isEngineLost(err)) throw err;
+      rows.push({ id: item.id, title: item.title, status: "error", source: "none", quote: "", verdict: "error", problem: err?.message || String(err) });
+      continue;
     }
     rows.push({ id: item.id, title: item.title, ...verifyFinding(finding, itemSources, item) });
   }
 
   const counts = rows.reduce((acc, r) => ({ ...acc, [r.verdict]: (acc[r.verdict] || 0) + 1 }), {});
-  const issues = counts.unverified ? [{ kind: "unverified-findings", detail: counts.unverified }] : [];
+  const issues = [];
+  if (counts.unverified) issues.push({ kind: "unverified-findings", detail: counts.unverified });
+  if (counts.error) issues.push({ kind: "failed-checks", detail: counts.error });
   return {
     content: complianceMarkdown(checklist, rows, { done: rows.length, total: rows.length })
       + (rows.length < checklist.items.length ? `
@@ -126,7 +134,7 @@ _Stopped after ${rows.length} of ${checklist.items.length} requirements._` : "")
     sources,
     verification: {
       status: issues.length ? "warning" : "grounded",
-      citedIds: [...new Set(rows.filter((r) => r.verdict !== "not_found" && r.verdict !== "unverified").map((r) => r.source))],
+      citedIds: [...new Set(rows.filter((r) => r.verdict === "addressed" || r.verdict === "partial").map((r) => r.source))],
       autoCited: [],
       issues,
     },

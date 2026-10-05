@@ -205,6 +205,7 @@ export function describeIssue(issue) {
     case "unsupported-number": return `figures not found in sources: ${issue.detail}`;
     case "off-topic": return "may not answer the question (the answer is less related to it than the best passage)";
     case "unverified-rows": return `${issue.detail} row${issue.detail === 1 ? "" : "s"} not matched to the cited source`;
+    case "failed-checks": return `${issue.detail} check${issue.detail === 1 ? "" : "s"} failed to run`;
     case "unverified-findings": return `${issue.detail} finding${issue.detail === 1 ? "" : "s"} without verifiable evidence`;
     case "unsupported-sentence": return `${issue.detail} sentence${issue.detail === 1 ? "" : "s"} not supported by any source`;
     default: return issue.kind;

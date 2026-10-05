@@ -213,6 +213,27 @@
       <p class="diag-note">
         Model weights are downloaded once from Hugging Face and cached by the browser. Chat history is stored unencrypted in this browser's IndexedDB.
       </p>
+
+      <h4 class="diag-heading">Feedback &amp; learning</h4>
+      <div class="diag-grid">
+        <div class="diag-row"><span>Answer feedback</span><span id="diag-feedback">—</span></div>
+        <label class="diag-toggle">
+          <input type="checkbox" id="diag-fewshot" />
+          <span>Use approved answers as examples <em>(experimental)</em>. Answers you rated 👍 or corrected guide the style of similar answers. Stays on this device.</span>
+        </label>
+        <label class="diag-toggle">
+          <input type="checkbox" id="diag-metrics" />
+          <span>Share anonymous usage metrics: task type, check results, ratings, reason codes, model and speed. Never your questions, documents or answers.</span>
+        </label>
+        <details class="diag-sample">
+          <summary>Exactly what a metrics event contains</summary>
+          <pre id="diag-metrics-sample"></pre>
+        </details>
+      </div>
+      <div class="diag-actions">
+        <button class="btn-top-action" data-action="export-feedback">Export feedback (JSON)</button>
+        <button class="btn-top-action" data-action="clear-feedback">Delete feedback</button>
+      </div>
       <div class="diag-actions">
         <button class="btn-top-action" data-action="load-model">Load selected model</button>
         <button class="btn-top-action" data-action="clear-model-cache">Remove cached model</button>

@@ -94,14 +94,24 @@ function longest(...texts) {
   return texts.reduce((a, b) => (b.length > a.length ? b : a));
 }
 
+/** Tokens an examples block will take, so callers can reserve room before retrieval. */
+export const examplesTokens = (examples) => (examples.length ? estimateTokens(formatExamples(examples)) : 0);
+
+function formatExamples(examples) {
+  return `\n\nEXAMPLES of answers the user approved earlier. Follow their style and length only. They may be about other documents: never reuse their facts or figures.\n\n${examples.map((e) => `Q: ${e.question}\nA: ${e.answer}`).join("\n\n")}\n\nEND OF EXAMPLES`;
+}
+
 /**
  * @param {ReturnType<typeof planTurn>} plan
  * @param {{filename:string, sources:Array, mode?:string}|null} doc
+ * @param {Array<{question:string, answer:string}>} [examples] approved answers (few-shot), search mode only
  */
-export function assembleMessages(plan, doc = null) {
+export function assembleMessages(plan, doc = null, examples = []) {
   let system = BASE_SYSTEM;
   if (doc) {
-    system = doc.mode === "summary" || doc.mode === "sample" ? SUMMARY_SYSTEM : SEARCH_SYSTEM;
+    const summary = doc.mode === "summary" || doc.mode === "sample";
+    system = summary ? SUMMARY_SYSTEM : SEARCH_SYSTEM;
+    if (!summary && examples.length) system += formatExamples(examples);
     system += `\n\nSOURCES from "${doc.filename}":\n\n${doc.sources.map(formatSource).join("\n\n")}\n\nEND OF SOURCES`;
   }
   return [{ role: "system", content: system }, ...plan.keptTurns, plan.current];

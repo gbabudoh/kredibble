@@ -1124,3 +1124,104 @@ body {
 .cite.auto {
   border-style: dashed;
 }
+
+/* ------------------------------------------------------------------
+   Feedback (Phase 3)
+   ------------------------------------------------------------------ */
+.msg-action-btn.rate.active {
+  color: var(--accent);
+  background: var(--bg-input);
+}
+
+.feedback-form {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-input);
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fb-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fb-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.fb-reason {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.fb-correction {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.fb-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.diag-heading {
+  margin: 20px 0 8px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.diag-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.diag-toggle input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.diag-sample summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.diag-sample pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg-code);
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+}
+
+.modal-card {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}

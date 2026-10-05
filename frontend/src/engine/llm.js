@@ -9,6 +9,11 @@ import { MODELS, DEFAULT_MODEL_KEY } from "./models.js";
 
 const FALLBACK_CONTEXT_WINDOW = 4096;
 
+// Errors WebLLM raises once the WebGPU device has been lost or the model was released.
+// Multi-step tasks must stop on these instead of recording them per step.
+const ENGINE_LOST_RE = /already been disposed|ModelNotLoaded|not loaded before|device (?:was |is )?lost|out of memory|GPUDevice/i;
+export const isEngineLost = (err) => ENGINE_LOST_RE.test(err?.message || String(err ?? ""));
+
 export class LocalLLM {
   constructor() {
     this.engine = null;

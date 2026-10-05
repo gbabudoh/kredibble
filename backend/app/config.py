@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Server-side parsing is optional (the web client parses in-browser).
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 
+    # Opt-in anonymous metrics (no content; see routers/metrics.py). Clients only send
+    # events when the user enables sharing; set METRICS_ENABLED=false to refuse them.
+    METRICS_ENABLED: bool = True
+    METRICS_DB: str = "data/metrics.sqlite"
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,

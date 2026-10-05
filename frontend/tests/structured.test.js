@@ -198,3 +198,24 @@ describe("candidate context", () => {
     expect(d.context).toBe("Availability must be at least 99.5% each month.");
   });
 });
+
+describe("compliance failures", () => {
+  const index = new DocumentIndex(doc);
+
+  it("stops the whole run when the engine is lost instead of filling the table with failures", async () => {
+    let calls = 0;
+    const llm = { async generateJSON() { calls++; if (calls === 2) throw new Error("Object has already been disposed"); return { quote: "", source: "none", status: "not_found", note: "" }; } };
+    await expect(runCompliance({ question: "GDPR", index, llm })).rejects.toThrow(/disposed/);
+    expect(calls).toBe(2);
+  });
+
+  it("shows an ordinary failure as 'Check failed' with its reason, never as a verdict", async () => {
+    let calls = 0;
+    const llm = { async generateJSON() { calls++; if (calls === 1) throw new Error("The structured answer was cut off (output limit reached)."); return { quote: "", source: "none", status: "not_found", note: "No." }; } };
+    const result = await runCompliance({ question: "GDPR", index, llm });
+    expect(result.task.counts).toEqual({ error: 1, not_found: 7 });
+    expect(result.task.findings[0]).toMatchObject({ verdict: "error", problem: "The structured answer was cut off (output limit reached)." });
+    expect(result.content).toContain("⚠ Check failed");
+    expect(result.verification.issues).toEqual([{ kind: "failed-checks", detail: 1 }]);
+  });
+});
