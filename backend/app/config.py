@@ -1,5 +1,6 @@
 import logging
 import secrets
+from pathlib import Path
 from typing import Dict, List
 
 from pydantic import model_validator
@@ -55,7 +56,8 @@ class Settings(BaseSettings):
     ]
 
     model_config = {
-        "env_file": ".env",
+        # Found wherever the server is started from: project root first, then backend/.
+        "env_file": (str(Path(__file__).resolve().parents[2] / ".env"), str(Path(__file__).resolve().parents[1] / ".env")),
         "case_sensitive": True,
         "extra": "ignore",
     }
