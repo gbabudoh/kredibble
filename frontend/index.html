@@ -135,7 +135,8 @@
             <polyline points="14 2 14 8 20 8"></polyline>
           </svg>
           <span id="attached-doc-name"></span>
-          <span id="attached-doc-meta" style="opacity: 0.6; font-size: 0.75rem;"></span>
+          <span id="attached-doc-meta" class="doc-meta"></span>
+          <button class="doc-scan" data-action="pii-scan" title="Scan this document for personal data (on this device)">Scan for personal data</button>
           <button class="doc-remove" data-action="remove-doc" title="Remove file">✕</button>
         </div>
 
@@ -147,7 +148,7 @@
             </svg>
           </button>
 
-          <div id="voice-wave-container" class="inline-voice-wave" style="display: none;">
+          <div id="voice-wave-container" class="inline-voice-wave">
             <div class="voice-wave-bars">
               <div class="wave-bar"></div>
               <div class="wave-bar"></div>
@@ -175,7 +176,7 @@
                 <line x1="12" y1="19" x2="12" y2="5"></line>
                 <polyline points="5 12 12 5 19 12"></polyline>
               </svg>
-              <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+              <svg id="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="5" y="5" width="14" height="14" rx="2"></rect>
               </svg>
             </button>
@@ -190,7 +191,7 @@
   </div>
 
   <!-- Engine diagnostics modal -->
-  <div id="telemetry-modal" class="modal-overlay" style="display: none;">
+  <div id="telemetry-modal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-title">Engine Diagnostics</h3>
@@ -208,11 +209,25 @@
         <div class="diag-row"><span>Context window</span><span id="diag-context">—</span></div>
         <div class="diag-row"><span>Last decode speed</span><span id="diag-speed">—</span></div>
         <div class="diag-row"><span>Time to first token</span><span id="diag-ttft">—</span></div>
-        <div class="diag-row"><span>Prompts sent to server</span><span style="color:var(--success);">None — inference runs in this browser</span></div>
+        <div class="diag-row"><span>Prompts sent to server</span><span class="ok-text">None — inference runs in this browser</span></div>
       </div>
       <p class="diag-note">
-        Model weights are downloaded once from Hugging Face and cached by the browser. Chat history is stored unencrypted in this browser's IndexedDB.
+        <span id="diag-source">Model weights are downloaded once from Hugging Face and cached by the browser.</span>
+        Chat history is encrypted only if you set a passphrase below.
       </p>
+
+      <h4 class="diag-heading">Privacy lock</h4>
+      <div class="diag-grid">
+        <div class="diag-row"><span>Chat history &amp; feedback</span><span id="diag-vault">—</span></div>
+        <p class="diag-note diag-note-tight">
+          With a passphrase, chats and feedback are encrypted on this device (AES-256). The key exists only while unlocked and is forgotten on reload or after 15 minutes idle. A forgotten passphrase cannot be recovered.
+        </p>
+      </div>
+      <div class="diag-actions">
+        <button class="btn-top-action" data-action="vault-set" id="diag-vault-set">Set passphrase</button>
+        <button class="btn-top-action" data-action="vault-lock" id="diag-vault-lock" hidden>Lock now</button>
+        <button class="btn-top-action" data-action="vault-remove" id="diag-vault-remove" hidden>Remove passphrase</button>
+      </div>
 
       <h4 class="diag-heading">Feedback &amp; learning</h4>
       <div class="diag-grid">
@@ -237,11 +252,27 @@
       <div class="diag-actions">
         <button class="btn-top-action" data-action="load-model">Load selected model</button>
         <button class="btn-top-action" data-action="clear-model-cache">Remove cached model</button>
-        <button class="btn-top-action" data-action="purge-history" style="color: var(--danger); border-color: var(--danger);">
+        <button class="btn-top-action btn-danger" data-action="purge-history">
           Erase all local chat history
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Passphrase lock (create / unlock) -->
+  <div id="vault-modal" class="modal-overlay vault-overlay" hidden>
+    <form class="modal-card vault-card" id="vault-form" autocomplete="off">
+      <h3 class="modal-title" id="vault-title">Unlock chat history</h3>
+      <p class="vault-text" id="vault-text">Your chats and feedback on this device are locked with a passphrase.</p>
+      <input type="password" id="vault-pass" class="vault-input" placeholder="Passphrase" autocomplete="current-password" />
+      <input type="password" id="vault-confirm" class="vault-input" placeholder="Repeat passphrase" autocomplete="new-password" hidden />
+      <p class="vault-error" id="vault-error" hidden></p>
+      <div class="diag-actions">
+        <button type="button" class="btn-top-action btn-danger" data-action="vault-forgot" id="vault-forgot">Forgot? Erase local data</button>
+        <button type="button" class="btn-top-action" data-action="vault-cancel" id="vault-cancel" hidden>Cancel</button>
+        <button type="submit" class="btn-top-action" id="vault-submit">Unlock</button>
+      </div>
+    </form>
   </div>
 
   <div id="toast" class="toast" hidden></div>

@@ -1,7 +1,17 @@
-// IndexedDB persistence for chat threads and answer feedback. Data is stored in plaintext
-// in this browser profile; encryption at rest is a planned follow-up.
+// IndexedDB persistence for chat threads and answer feedback.
+// Records are plaintext unless the user sets a passphrase (core/vault.js); then every record
+// is sealed with AES-GCM except its id and updatedAt.
+import { isSealed } from "./vault.js";
+
 const DB_NAME = "KredibbleChatDB";
 const DB_VERSION = 3; // v3 adds the "feedback" store
+
+let cipher = null; // { seal, open } while a vault is unlocked
+
+/** Sets (or clears, with null) the cipher used for all reads and writes. */
+export function setCipher(next) {
+  cipher = next;
+}
 
 function open() {
   return new Promise((resolve, reject) => {
@@ -26,19 +36,57 @@ async function run(store, mode, fn) {
   });
 }
 
+// Encryption happens before the transaction opens: IndexedDB transactions auto-commit
+// as soon as the code awaits anything that is not an IndexedDB request.
+const seal = (record) => (cipher ? cipher.seal(record) : record);
+
+async function readAll(store) {
+  const stored = (await run(store, "readonly", (s) => s.getAll())) || [];
+  const out = [];
+  for (const record of stored) {
+    if (!isSealed(record)) out.push(record);
+    else if (cipher) out.push(await cipher.open(record));
+    // Sealed records stay unreadable while the vault is locked.
+  }
+  return out;
+}
+
+async function writeAll(store, records) {
+  const sealed = await Promise.all(records.map(seal));
+  return run(store, "readwrite", (s) => { for (const r of sealed) s.put(r); });
+}
+
+/** True if any stored record is encrypted (so the app must ask for the passphrase). */
+export async function hasSealedRecords() {
+  for (const store of ["threads", "feedback"]) {
+    const stored = (await run(store, "readonly", (s) => s.getAll())) || [];
+    if (stored.some(isSealed)) return true;
+  }
+  return false;
+}
+
 export const ThreadStore = {
   async all() {
     try {
-      const list = (await run("threads", "readonly", (s) => s.getAll())) || [];
+      const list = await readAll("threads");
       return list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     } catch (err) {
       console.warn("Thread load failed:", err);
       return [];
     }
   },
-  save(thread) {
+  async save(thread) {
     thread.updatedAt = new Date().toISOString();
-    return run("threads", "readwrite", (s) => s.put(thread)).catch((err) => console.warn("Thread save failed:", err));
+    try {
+      const record = await seal(thread);
+      await run("threads", "readwrite", (s) => s.put(record));
+    } catch (err) {
+      console.warn("Thread save failed:", err);
+    }
+  },
+  /** Re-writes every thread with the current cipher (used when a passphrase is set or removed). */
+  rewriteAll(threads) {
+    return writeAll("threads", threads);
   },
   remove(id) {
     return run("threads", "readwrite", (s) => s.delete(id)).catch((err) => console.warn("Thread delete failed:", err));
@@ -51,14 +99,18 @@ export const ThreadStore = {
 export const FeedbackStore = {
   async all() {
     try {
-      return (await run("feedback", "readonly", (s) => s.getAll())) || [];
+      return await readAll("feedback");
     } catch (err) {
       console.warn("Feedback load failed:", err);
       return [];
     }
   },
-  save(record) {
-    return run("feedback", "readwrite", (s) => s.put(record));
+  async save(record) {
+    const stored = await seal(record);
+    return run("feedback", "readwrite", (s) => s.put(stored));
+  },
+  rewriteAll(records) {
+    return writeAll("feedback", records);
   },
   remove(id) {
     return run("feedback", "readwrite", (s) => s.delete(id));

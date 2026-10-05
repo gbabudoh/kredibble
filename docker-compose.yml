@@ -10,6 +10,10 @@ services:
       - .env          # SECRET_KEY, KREDIBBLE_USERS, ALLOWED_ORIGINS — see .env.example
     environment:
       - DEBUG=false
+    # Self-hosted models: mount the mirror and set MODELS_DIR=/models and MODEL_SOURCES=[] in .env
+    # volumes:
+    #   - ./models:/models:ro
+    #   - ./data:/workspace/backend/data
     restart: always
     security_opt:
       - no-new-privileges:true

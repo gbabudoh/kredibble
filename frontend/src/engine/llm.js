@@ -20,6 +20,19 @@ export class LocalLLM {
     this.loadedModelId = null;
     this.gpu = { supported: false, f16: false, description: "Not detected" };
     this.lastUsage = null;
+    this.appConfig = prebuiltAppConfig;
+    this.available = null; // model ids on a self-hosted mirror, or null for public hosts
+  }
+
+  /** Uses a model source from engine/source.js (public hosts or a self-hosted mirror). */
+  setSource({ appConfig, available }) {
+    this.appConfig = appConfig;
+    this.available = available;
+  }
+
+  /** Curated models usable with the current source (all of them unless self-hosted). */
+  availableModels() {
+    return this.available ? MODELS.filter((m) => this.available.includes(m.f16) || this.available.includes(m.f32)) : MODELS;
   }
 
   async probeGPU() {
@@ -48,7 +61,11 @@ export class LocalLLM {
 
   resolveModelId(key) {
     const model = LocalLLM.modelByKey(key);
-    return this.gpu.f16 ? model.f16 : model.f32;
+    const preferred = this.gpu.f16 ? model.f16 : model.f32;
+    if (!this.available || this.available.includes(preferred)) return preferred;
+    // Self-hosted mirrors may hold only one precision. f32 runs everywhere; f16 needs shader-f16.
+    if (this.available.includes(model.f32)) return model.f32;
+    return this.gpu.f16 && this.available.includes(model.f16) ? model.f16 : preferred;
   }
 
   static modelRecord(modelId) {
@@ -60,7 +77,7 @@ export class LocalLLM {
   }
 
   isCached(modelId) {
-    return hasModelInCache(modelId).catch(() => false);
+    return hasModelInCache(modelId, this.appConfig).catch(() => false);
   }
 
   async load(modelId, onProgress) {
@@ -72,7 +89,7 @@ export class LocalLLM {
       await this.engine.reload(modelId);
     } else {
       this.worker = new Worker(new URL("./llm.worker.js", import.meta.url), { type: "module" });
-      this.engine = await CreateWebWorkerMLCEngine(this.worker, modelId, { initProgressCallback });
+      this.engine = await CreateWebWorkerMLCEngine(this.worker, modelId, { initProgressCallback, appConfig: this.appConfig });
     }
     this.loadedModelId = modelId;
   }
@@ -82,7 +99,7 @@ export class LocalLLM {
       await this.engine.unload();
       this.loadedModelId = null;
     }
-    await deleteModelAllInfoInCache(modelId);
+    await deleteModelAllInfoInCache(modelId, this.appConfig);
   }
 
   /** Streams completion text deltas. Usage stats land in `this.lastUsage`. */

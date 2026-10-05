@@ -18,7 +18,13 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 export function renderMarkdown(text) {
   if (!text) return "";
-  return DOMPurify.sanitize(marked.parse(text), { FORBID_TAGS, FORBID_ATTR: ["style", "srcset"] });
+  // ALLOW_DATA_ATTR: false — the app dispatches clicks by data-action, so a model-emitted
+  // <button data-action="purge-history"> would otherwise become a working app control.
+  return DOMPurify.sanitize(marked.parse(text), {
+    FORBID_TAGS: [...FORBID_TAGS, "button", "textarea", "select"],
+    FORBID_ATTR: ["style", "srcset", "id", "name"],
+    ALLOW_DATA_ATTR: false,
+  });
 }
 
 export function escapeHtml(text) {

@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = True
     METRICS_DB: str = "data/metrics.sqlite"
 
+    # Self-hosted model mirror (filled by frontend/scripts/fetch-models.mjs). When set, the
+    # server serves it at /models and the web client downloads models from here only.
+    MODELS_DIR: str = ""
+
+    # Hosts the browser may fetch model weights and WebGPU kernels from (CSP connect-src).
+    # Self-hosted / air-gapped deployments serve models from this server and set this to [].
+    MODEL_SOURCES: List[str] = [
+        "https://huggingface.co",
+        "https://*.huggingface.co",
+        "https://*.hf.co",
+        "https://raw.githubusercontent.com",
+    ]
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,

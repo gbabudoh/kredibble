@@ -122,3 +122,18 @@ def test_parse_hides_parser_internals(auth_headers):
     response = _upload("broken.pdf", b"%PDF-1.4 not really a pdf", auth_headers)
     assert response.status_code == 422
     assert response.json()["detail"] == "The document could not be parsed."
+
+
+def test_content_security_policy_is_strict():
+    csp = client.get("/api/v1/health").headers["Content-Security-Policy"]
+    directives = {d.split()[0]: d.split()[1:] for d in csp.split("; ")}
+    assert directives["script-src"] == ["'self'", "'wasm-unsafe-eval'"]  # no inline script, no eval
+    assert directives["style-src"] == ["'self'"]                         # no inline styles either
+    assert directives["object-src"] == ["'none'"] and directives["frame-ancestors"] == ["'none'"]
+    assert directives["connect-src"][0] == "'self'"
+    assert "'unsafe-inline'" not in csp and "'unsafe-eval'" not in csp
+
+
+def test_self_hosted_deployments_can_drop_external_model_hosts():
+    from app.main import content_security_policy
+    assert "connect-src 'self';" in content_security_policy([])

@@ -1,8 +1,10 @@
 // Kredibble web client: on-device chat over WebLLM.
 import "./styles.css";
 import { LocalLLM, isEngineLost } from "./engine/llm.js";
+import { loadModelSource } from "./engine/source.js";
 import { MODELS, DEFAULT_MODEL_KEY } from "./engine/models.js";
-import { ThreadStore, FeedbackStore } from "./core/db.js";
+import { ThreadStore, FeedbackStore, setCipher, hasSealedRecords } from "./core/db.js";
+import { createVault, recordCipher, unlockVault } from "./core/vault.js";
 import { renderMarkdown, escapeHtml } from "./core/render.js";
 import { planTurn, assembleMessages, examplesTokens, ANSWER_MAX_TOKENS } from "./core/prompt.js";
 import { extractDocument } from "./services/documents.js";
@@ -13,6 +15,7 @@ import { runCompliance } from "./structured/compliance.js";
 import { REASONS, buildRecord, documentFingerprint, selectExamples, toEvalCandidates } from "./learning/feedback.js";
 import { buildEvent, lastEvent, metricsEnabled, sendEvent, setMetricsEnabled } from "./learning/metrics.js";
 import registry from "./registry/registry.json";
+import { PII_LABELS, mask, redact, redactPages, scanDocument } from "./privacy/pii.js";
 import { Embedder } from "./rag/embedder.js";
 import { groundAnswer, describeIssue, relevanceIssue, stripCitations, NOT_FOUND_TEXT } from "./rag/verify.js";
 
@@ -29,7 +32,12 @@ const storage = {
   set(key, value) {
     try { localStorage.setItem(key, value); } catch { /* private mode */ }
   },
+  remove(key) {
+    try { localStorage.removeItem(key); } catch { /* private mode */ }
+  },
 };
+
+const IDLE_LOCK_MS = 15 * 60 * 1000;
 
 const HERO_PROMPTS = [
   { title: "🌍 General question", desc: "Ask anything — answered on this device", prompt: "What is the capital of the UK?" },
@@ -49,6 +57,9 @@ class KredibbleApp {
     this.feedback = [];
     this.feedbackFormFor = null; // message index with the 👎 form open
     this.useExamples = storage.get("kredibble_fewshot", "off") === "on";
+    this.vaultKey = null;
+    this.vaultMode = null; // "unlock" | "create" while the passphrase dialog is open
+    this.lastActivity = Date.now();
     this.embedder = new Embedder();
     this.semantic = { state: "off", progress: 0 }; // off | loading | indexing | ready | failed
     this.isStreaming = false;
@@ -65,10 +76,16 @@ class KredibbleApp {
     this.updateTTSButton();
     this.bindEvents();
     this.setupSpeechRecognition();
+    const source = await loadModelSource();
+    this.llm.setSource(source);
+    if (source.selfHosted) this.embedder.appConfig = source.appConfig;
+    this.modelSource = source;
     this.populateModelSelect();
 
+    if (this.vaultConfig() || (await hasSealedRecords())) await this.requireUnlock();
     await this.loadThreads();
     this.feedback = await FeedbackStore.all();
+    this.startIdleLock();
 
     await this.llm.probeGPU();
     if (!this.llm.gpu.supported) {
@@ -117,6 +134,13 @@ class KredibbleApp {
       "feedback-save": (el) => this.saveFeedbackForm(Number(el.dataset.index)),
       "feedback-cancel": () => { this.feedbackFormFor = null; this.renderMessages(); },
       "export-feedback": () => this.exportFeedback(),
+      "pii-scan": () => this.scanPersonalData(),
+      "pii-download": () => this.downloadRedacted(),
+      "vault-set": () => this.openVaultDialog("create"),
+      "vault-lock": () => this.lock(),
+      "vault-remove": () => this.removePassphrase(),
+      "vault-forgot": () => this.eraseLockedData(),
+      "vault-cancel": () => this.closeVaultDialog(),
       "clear-feedback": () => this.clearFeedback(),
       "speak": (el) => this.speak(this.getActiveThread().messages[Number(el.dataset.index)]?.content),
     };
@@ -152,6 +176,11 @@ class KredibbleApp {
       e.preventDefault();
       const file = e.dataTransfer?.files?.[0];
       if (file) this.handleFile(file);
+    });
+
+    $("vault-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      this.submitVault();
     });
 
     $("diag-fewshot").addEventListener("change", (e) => {
@@ -586,7 +615,7 @@ class KredibbleApp {
   setStreaming(on) {
     this.isStreaming = on;
     $("send-icon").style.display = on ? "none" : "";
-    $("stop-icon").style.display = on ? "" : "none";
+    $("stop-icon").style.display = on ? "inline" : "none";
     $("send-btn").title = on ? "Stop generating" : "Send Message";
   }
 
@@ -683,7 +712,9 @@ class KredibbleApp {
               <div class="msg-actions">
                 <button class="msg-action-btn" data-action="copy" data-index="${i}" title="Copy response">📋 Copy</button>
                 <button class="msg-action-btn" data-action="speak" data-index="${i}" title="Read aloud">🔊 Read</button>
-                ${m.error ? "" : this.renderRatingButtons(m, i)}
+                ${m.error || m.meta?.task?.type === "pii" ? "" : this.renderRatingButtons(m, i)}
+                ${m.meta?.task?.type === "pii" && m.meta.task.total && this.activeDoc?.filename === m.meta.doc
+                  ? `<button class="msg-action-btn" data-action="pii-download" title="Download a redacted text copy">⬇ Redacted copy</button>` : ""}
                 ${this.renderMeta(m.meta)}
               </div>
               ${this.renderGrounding(m.meta, i)}
@@ -781,13 +812,19 @@ class KredibbleApp {
   // ---------------------------------------------------------------
   populateModelSelect() {
     const select = $("diag-model-select");
-    for (const m of MODELS) {
+    const models = this.llm.availableModels();
+    for (const m of models) {
       const option = document.createElement("option");
       option.value = m.key;
       option.textContent = m.label;
       select.append(option);
     }
+    // A self-hosted mirror may not include the remembered or default model.
+    if (models.length && !models.some((m) => m.key === this.modelKey)) this.modelKey = models[0].key;
     select.value = LocalLLM.modelByKey(this.modelKey).key;
+    $("diag-source").textContent = this.modelSource?.selfHosted
+      ? "Model files are served by this organisation's own server and cached by the browser."
+      : "Model weights are downloaded once from Hugging Face and cached by the browser.";
   }
 
   updateDiagnostics() {
@@ -814,6 +851,7 @@ class KredibbleApp {
     if (show) {
       this.updateDiagnostics();
       this.updateLearningDiagnostics();
+      this.updateVaultDiagnostics();
     }
     $("telemetry-modal").style.display = show ? "flex" : "none";
   }
@@ -908,6 +946,204 @@ class KredibbleApp {
   }
 
   // ---------------------------------------------------------------
+  // Personal data scan (privacy/pii.js), entirely on this device
+  // ---------------------------------------------------------------
+  async scanPersonalData() {
+    const doc = this.activeDoc;
+    if (!doc || this.isStreaming) return;
+    const report = scanDocument(doc.pages);
+    const thread = this.getActiveThread();
+    if (!thread.messages.length) thread.title = `Personal data scan: ${doc.filename}`.slice(0, 40);
+
+    let content;
+    if (!report.total) {
+      content = `No personal identifiers with a recognisable format were found in **${doc.filename}**.\n\n` +
+        "_Checked: emails, phone numbers, payment cards (Luhn-validated), IBANs (checksum-validated), UK NI and US SSN numbers, IP addresses. " +
+        "Names and other free-text personal data are not detected, so this does not prove the document holds no personal data._";
+    } else {
+      const rows = Object.entries(report.counts).map(([type, count]) => {
+        const hits = report.findings.filter((f) => f.type === type);
+        const pages = [...new Set(hits.map((f) => f.page))].slice(0, 8).join(", ");
+        return `| ${PII_LABELS[type]} | ${count} | ${pages} | ${hits.slice(0, 2).map((f) => `\`${mask(f.value)}\``).join(", ")} |`;
+      });
+      content = [
+        `Found **${report.total}** personal identifier${report.total === 1 ? "" : "s"} in **${doc.filename}**:`,
+        "",
+        "| Type | Count | Pages | Examples (masked) |",
+        "|---|---|---|---|",
+        ...rows,
+        "",
+        "_The scan ran on this device. Names and other free-text personal data are not detected. Use **Redacted copy** to download the text with these identifiers replaced._",
+      ].join("\n");
+    }
+    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    thread.messages.push({ role: "user", content: `Scan ${doc.filename} for personal data`, timestamp: time });
+    thread.messages.push({
+      role: "assistant", content, timestamp: time,
+      meta: { doc: doc.filename, task: { type: "pii", total: report.total, counts: report.counts } },
+    });
+    await ThreadStore.save(thread);
+    this.renderAll();
+  }
+
+  downloadRedacted() {
+    const doc = this.activeDoc;
+    if (!doc) return;
+    const text = redactPages(doc.pages).map((p) => `--- Page ${p.page} ---\n${p.text}`).join("\n\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const name = doc.filename.replace(/\.[^.]+$/, "") + ".redacted.txt";
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---------------------------------------------------------------
+  // Passphrase lock (core/vault.js)
+  // ---------------------------------------------------------------
+  vaultConfig() {
+    try { return JSON.parse(storage.get("kredibble_vault") || "null"); } catch { return null; }
+  }
+
+  /** Shows the unlock dialog and resolves once the vault is unlocked or the data erased. */
+  requireUnlock() {
+    return new Promise((resolve) => {
+      this.unlockResolve = resolve;
+      this.openVaultDialog("unlock");
+    });
+  }
+
+  openVaultDialog(mode) {
+    this.vaultMode = mode;
+    const create = mode === "create";
+    const missingConfig = !create && !this.vaultConfig();
+    $("vault-title").textContent = create ? "Set a passphrase" : "Unlock chat history";
+    $("vault-text").textContent = create
+      ? "Chats and feedback on this device will be encrypted. You'll need this passphrase after every reload. It cannot be recovered if forgotten."
+      : missingConfig
+        ? "Encrypted data was found, but its lock settings are missing (site data may have been partly cleared). It cannot be unlocked."
+        : "Your chats and feedback on this device are locked with a passphrase.";
+    $("vault-pass").hidden = missingConfig;
+    $("vault-confirm").hidden = !create;
+    $("vault-submit").hidden = missingConfig;
+    $("vault-submit").textContent = create ? "Encrypt" : "Unlock";
+    $("vault-cancel").hidden = !create;
+    $("vault-forgot").hidden = create;
+    $("vault-error").hidden = true;
+    $("vault-pass").value = "";
+    $("vault-confirm").value = "";
+    $("vault-modal").hidden = false;
+    if (!missingConfig) $("vault-pass").focus();
+  }
+
+  closeVaultDialog() {
+    $("vault-modal").hidden = true;
+    this.vaultMode = null;
+  }
+
+  vaultError(message) {
+    $("vault-error").textContent = message;
+    $("vault-error").hidden = false;
+  }
+
+  async submitVault() {
+    const pass = $("vault-pass").value;
+    const submit = $("vault-submit");
+    const label = submit.textContent;
+    submit.disabled = true;
+    submit.textContent = "Working…";
+    try {
+      if (this.vaultMode === "create") {
+        if (pass !== $("vault-confirm").value) return this.vaultError("The passphrases don't match.");
+        const { config, key } = await createVault(pass);
+        this.applyKey(key);
+        await ThreadStore.rewriteAll(this.threads.filter((t) => t.messages.length));
+        await FeedbackStore.rewriteAll(this.feedback);
+        storage.set("kredibble_vault", JSON.stringify(config));
+        this.closeVaultDialog();
+        this.toast("Chat history and feedback are now encrypted on this device.");
+      } else {
+        const key = await unlockVault(pass, this.vaultConfig());
+        if (!key) return this.vaultError("That passphrase is not correct.");
+        this.applyKey(key);
+        this.closeVaultDialog();
+        this.unlockResolve?.();
+      }
+    } catch (err) {
+      this.vaultError(errorText(err));
+    } finally {
+      submit.disabled = false;
+      submit.textContent = label;
+      this.updateVaultDiagnostics();
+    }
+  }
+
+  applyKey(key) {
+    this.vaultKey = key;
+    setCipher(key ? recordCipher(key) : null);
+    this.lastActivity = Date.now();
+  }
+
+  async lock() {
+    if (!this.vaultConfig()) return;
+    if (this.isStreaming) {
+      this.toast("Locking after the current answer finishes.");
+      this.lockWhenIdle = true;
+      return;
+    }
+    this.applyKey(null);
+    this.threads = [];
+    this.feedback = [];
+    this.setDocument(null); // the loaded document may be sensitive too
+    this.createThread();
+    this.renderAll();
+    this.showDiagnostics(false);
+    await this.requireUnlock();
+    await this.loadThreads();
+    this.feedback = await FeedbackStore.all();
+  }
+
+  startIdleLock() {
+    const touch = () => { this.lastActivity = Date.now(); };
+    for (const evt of ["pointerdown", "keydown", "wheel", "touchstart"]) document.addEventListener(evt, touch, { passive: true });
+    setInterval(() => {
+      const idle = Date.now() - this.lastActivity > IDLE_LOCK_MS;
+      if (this.vaultKey && !this.isStreaming && (idle || this.lockWhenIdle)) {
+        this.lockWhenIdle = false;
+        this.lock();
+      }
+    }, 30_000);
+  }
+
+  async removePassphrase() {
+    if (!this.vaultKey || !confirm("Remove the passphrase and store chat history unencrypted on this device?")) return;
+    this.applyKey(null);
+    await ThreadStore.rewriteAll(this.threads.filter((t) => t.messages.length));
+    await FeedbackStore.rewriteAll(this.feedback);
+    storage.remove("kredibble_vault");
+    this.updateVaultDiagnostics();
+    this.toast("Passphrase removed. History is no longer encrypted.");
+  }
+
+  async eraseLockedData() {
+    if (!confirm("Permanently erase all chat history and feedback stored in this browser? This cannot be undone.")) return;
+    await ThreadStore.clear();
+    await FeedbackStore.clear();
+    storage.remove("kredibble_vault");
+    this.applyKey(null);
+    this.closeVaultDialog();
+    this.unlockResolve?.();
+    this.toast("Local chat history and feedback erased.");
+  }
+
+  updateVaultDiagnostics() {
+    const locked = !!this.vaultConfig();
+    $("diag-vault").textContent = locked ? "Encrypted with your passphrase (unlocked)" : "Not encrypted";
+    $("diag-vault-set").hidden = locked;
+    $("diag-vault-lock").hidden = !locked;
+    $("diag-vault-remove").hidden = !locked;
+  }
+
+  // ---------------------------------------------------------------
   // Feedback (stored on this device; reused as examples if enabled)
   // ---------------------------------------------------------------
   renderRatingButtons(m, i) {
@@ -997,7 +1233,15 @@ class KredibbleApp {
   }
 
   exportFeedback() {
-    const payload = { exportedAt: new Date().toISOString(), registryVersion: registry.version, records: this.feedback, evalCandidates: toEvalCandidates(this.feedback) };
+    // Exports leave the app, so recognisable identifiers are redacted (see privacy/pii.js).
+    const records = this.feedback.map((r) => ({ ...r, question: redact(r.question || ""), answer: redact(r.answer || ""), correction: redact(r.correction || "") }));
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      registryVersion: registry.version,
+      redaction: "Emails, phone numbers, card numbers, IBANs, NI/SSN numbers and IP addresses were replaced. Names and other free text were not.",
+      records,
+      evalCandidates: toEvalCandidates(records),
+    };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `kredibble-feedback-${new Date().toISOString().slice(0, 10)}.json` });
     a.click();

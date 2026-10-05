@@ -2,19 +2,22 @@
 // engine so switching chat models never discards a document's semantic index.
 import { CreateWebWorkerMLCEngine, hasModelInCache } from "@mlc-ai/web-llm";
 
-export const EMBEDDING_MODEL_ID = "snowflake-arctic-embed-s-q0f32-MLC-b4";
+import { EMBEDDING_MODEL_ID } from "./model-ids.js";
+
+export { EMBEDDING_MODEL_ID };
 const QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 const BATCH = 8;
 
 export class Embedder {
   constructor(modelId = EMBEDDING_MODEL_ID) {
     this.modelId = modelId;
+    this.appConfig = undefined; // set to a self-hosted appConfig by the app when available
     this.engine = null;
     this.loading = null;
   }
 
   isCached() {
-    return hasModelInCache(this.modelId).catch(() => false);
+    return hasModelInCache(this.modelId, this.appConfig).catch(() => false);
   }
 
   load(onProgress) {
@@ -23,6 +26,7 @@ export class Embedder {
       const worker = new Worker(new URL("../engine/llm.worker.js", import.meta.url), { type: "module" });
       this.loading = CreateWebWorkerMLCEngine(worker, this.modelId, {
         initProgressCallback: (report) => onProgress?.(report),
+        ...(this.appConfig ? { appConfig: this.appConfig } : {}),
       })
         .then((engine) => { this.engine = engine; })
         .catch((err) => { this.loading = null; worker.terminate(); throw err; });

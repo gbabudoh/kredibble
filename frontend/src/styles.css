@@ -1,9 +1,9 @@
 /* Kredibble Enterprise Design System - ChatGPT Minimalist Style */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* System fonts only: no third-party font requests (privacy, offline/air-gapped use, strict CSP). */
 
 :root {
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
   --sidebar-width: 260px;
 }
 
@@ -1224,4 +1224,90 @@ body {
 .modal-card {
   max-height: calc(100vh - 32px);
   overflow-y: auto;
+}
+
+/* ------------------------------------------------------------------
+   Former inline styles (removed so the CSP can forbid inline styles).
+   JS toggles these elements with element.style, which CSP permits.
+   ------------------------------------------------------------------ */
+#voice-wave-container,
+#stop-icon,
+#telemetry-modal {
+  display: none;
+}
+
+.doc-meta {
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+
+.ok-text {
+  color: var(--success);
+}
+
+.btn-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ------------------------------------------------------------------
+   Passphrase lock (Phase 4)
+   ------------------------------------------------------------------ */
+.vault-overlay {
+  display: flex;
+  z-index: 900;
+  backdrop-filter: blur(6px);
+}
+
+.vault-overlay[hidden] {
+  display: none !important;
+}
+
+.vault-card {
+  max-width: 420px;
+  width: calc(100vw - 32px);
+}
+
+.vault-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.vault-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.vault-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.diag-note-tight {
+  margin: 0;
+}
+
+.doc-scan {
+  margin-left: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.doc-scan:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
 }

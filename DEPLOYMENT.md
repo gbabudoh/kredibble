@@ -29,7 +29,7 @@ On first use, each browser downloads model files. Allow HTTPS to:
 * `huggingface.co` and its CDN hosts (`cdn-lfs.huggingface.co`, `cdn-lfs-us-1.hf.co`, `*.hf.co`): model weights
 * `raw.githubusercontent.com`: WebGPU model libraries (`.wasm`)
 
-After that, files are served from the browser cache and inference needs no network. Hosting the weights inside your own network for air-gapped sites is on the roadmap.
+After that, files are served from the browser cache and inference needs no network. For networks without internet access, host the models yourself (section 5).
 
 ## 3. Configuration
 Copy `.env.example` to `.env` and set:
@@ -57,10 +57,23 @@ Put the container behind a TLS-terminating reverse proxy. WebGPU and service wor
 ```
 Then open `http://127.0.0.1:8000`.
 
-## 5. Anonymous metrics (optional)
+## 5. Self-hosted models (air-gapped networks)
+1. On a machine with internet access, mirror the models:
+   ```bash
+   cd frontend && npm ci
+   node scripts/fetch-models.mjs --out ../models                                   # default model, f16 + f32, plus embedder
+   node scripts/fetch-models.mjs --out ../models --models qwen2.5-1.5b,llama3.2-1b    # several models
+   ```
+   Include `--precision f32` (on by default) for GPUs without `shader-f16`.
+2. Copy the `models/` folder to the server.
+3. Set `MODELS_DIR` to that folder (in Docker, mount it and set `MODELS_DIR=/models`), and set `MODEL_SOURCES=[]` so the security policy forbids any other download host.
+
+The app then offers only the mirrored models and fetches them from `/models` on your own server. Browsers still cache them after the first load.
+
+## 6. Anonymous metrics (optional)
 Users can opt in to sharing anonymous usage metrics. Events contain no text, only task type, check results, ratings, reason codes, model and speed, and are stored in SQLite at `METRICS_DB` (default `backend/data/metrics.sqlite`). In Docker, mount a volume at `/workspace/backend/data` to keep them across restarts. To refuse metrics entirely, set `METRICS_ENABLED=false`. Aggregates are at `GET /api/v1/metrics/summary`, which requires login.
 
-## 6. Policy recommendations
+## 7. Policy recommendations
 * Disable browser dictation by policy where speech must not leave the device (it uses Google/Microsoft cloud services).
-* Enforce full-disk encryption on endpoints. Local chat history isn't encrypted by the app yet.
+* Enforce full-disk encryption on endpoints, and encourage users to set a passphrase (Engine Diagnostics → Privacy lock). Without one, local chat history is stored unencrypted.
 * On shared machines, train users to use **Erase all local chat history** in *Engine Diagnostics*.

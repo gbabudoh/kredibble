@@ -14,8 +14,8 @@ Kredibble runs open-weight models inside the user's browser with WebLLM and WebG
 |---|---|---|
 | Prompts and model responses | Browser (WebLLM, Web Worker) | No |
 | Uploaded documents | Browser (pdf.js / File API) | No |
-| Chat history | Browser IndexedDB (plaintext) | No |
-| Model weights and WebGPU kernels | Downloaded once from Hugging Face / GitHub, cached in the browser | Inbound download only. No user data is sent. |
+| Chat history and feedback | Browser IndexedDB; AES-GCM-256 encrypted when the user sets a passphrase, plaintext otherwise | No |
+| Model weights and WebGPU kernels | Downloaded once from Hugging Face / GitHub, or from the customer's own server when self-hosted; cached in the browser | Inbound download only. No user data is sent. |
 | Login credentials | Kredibble API (`/api/v1/auth/login`) | Yes, to the customer's or Kredibble's API host |
 | Dictation audio (optional) | Browser speech service (Google in Chrome, Microsoft in Edge) | **Yes.** Users are warned before first use. Disable dictation by policy where this is unacceptable. |
 
@@ -23,19 +23,21 @@ Kredibble runs open-weight models inside the user's browser with WebLLM and WebG
 * **Data minimisation (Art. 5(1)(c)):** The server doesn't receive conversation or document content, so it holds no such personal data.
 * **Erasure (Art. 17):** Conversation data exists only in the user's browser. One click in the app erases all local history, and clearing site data removes everything, including cached models.
 * **International transfers (Chapter V):** No content is transferred for inference. Model downloads are inbound and carry no personal data. Dictation, if enabled, is a transfer to the browser vendor and should be assessed separately.
-* **Customer responsibilities:** Endpoint security, device encryption (e.g. BitLocker/FileVault, since IndexedDB isn't encrypted by Kredibble yet), and access to shared machines.
+* **Customer responsibilities:** Endpoint security, device encryption (e.g. BitLocker/FileVault), and access to shared machines. Encourage users to set a passphrase so local history is encrypted by the app as well.
 
 ### 3. HIPAA Security Rule considerations (US healthcare)
 * **Transmission security (§ 164.312(e)):** PHI in prompts and documents isn't transmitted to Kredibble for inference. Whether a Business Associate Agreement is needed depends on the full deployment (hosting, support access, logs). Customers should confirm this with counsel rather than assume it isn't needed.
-* **Access control (§ 164.312(a)):** The API issues signed, expiring JWTs (HS256) for configured users with PBKDF2-hashed passwords. Device-level access control stays the customer's responsibility, because local history is readable by anyone with access to the browser profile.
+* **Access control (§ 164.312(a)):** The API issues signed, expiring JWTs (HS256) for configured users with PBKDF2-hashed passwords. Device-level access control stays the customer's responsibility: unless a passphrase is set, local history is readable by anyone with access to the browser profile.
 * **Audit controls (§ 164.312(b)):** The API can log authentication events and request metadata. It never receives conversation content, so it can't log it.
-* **Encryption at rest (§ 164.312(a)(2)(iv)):** Not yet provided by the application for local history. Rely on full-disk encryption until in-app encryption ships.
+* **Encryption at rest (§ 164.312(a)(2)(iv)):** When a user sets a passphrase, local history is encrypted with AES-GCM-256 using a key derived from it (PBKDF2-SHA256, 600,000 iterations). The key is held in memory only and discarded on reload, lock or 15 minutes of inactivity. Without a passphrase the application does not encrypt local history; rely on full-disk encryption and consider requiring a passphrase by policy.
 
-### 4. AI output risk
-Small on-device models can be wrong. Kredibble reduces this by grounding answers in the loaded document, asking for page citations, disclosing when only part of a document was read, and stripping active content from responses. Outputs should still be reviewed by a qualified person before they inform legal, financial or clinical decisions.
+### 4. Additional technical safeguards
+* **Content Security Policy:** the browser may run only the application's own scripts (no inline script, no eval) and connect only to the deployment's server plus configured model hosts, or only the server when models are self-hosted. Injected content cannot load external resources or send data elsewhere.
+* **Self-hosted models:** model files can be mirrored to the customer's own server, so no external host is contacted at all.
+* **Personal-data scan and redaction:** recognisable identifiers (emails, phone numbers, payment cards, IBANs, NI/SSN numbers, IP addresses) can be found and redacted on the device. Exports of feedback are redacted. Names and free-text personal data are not detected.
 
-### 5. Roadmap items affecting this document
-* Encryption at rest for local history (WebCrypto AES-GCM).
-* Self-hosted model weights for air-gapped networks.
-* Retrieval with verifiable, quote-checked citations.
+### 5. AI output risk
+Small on-device models can be wrong. Kredibble reduces this by retrieving the relevant passages from the whole document, requiring answers to cite them, and checking every answer: citations must exist, quoted text and figures must appear in the sources, and unsupported sentences or answers that may not address the question are flagged. Compliance checks accept a verdict only when the quoted evidence is found in the document. Active content is stripped from responses. Outputs should still be reviewed by a qualified person before they inform legal, financial or clinical decisions.
+
+### 6. Roadmap items affecting this document
 * Optional on-device speech recognition.

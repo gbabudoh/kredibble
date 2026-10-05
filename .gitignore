@@ -9,3 +9,6 @@ backend/app/static/
 evals/reports/*
 !evals/reports/baseline-*.json
 backend/data/
+
+# Self-hosted model mirror (frontend/scripts/fetch-models.mjs output)
+models/
